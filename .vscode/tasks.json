@@ -1,0 +1,35 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "build: controller_agent",
+      "type": "shell",
+      "command": "cmake --build R:/build --target controller_agent -j 8",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PATH": "C:\\Users\\jh\\msys64\\clang64\\bin;C:\\Users\\jh\\msys64\\mingw64\\bin;C:\\Users\\jh\\msys64\\usr\\bin;${env:PATH}"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "test: pytest P0",
+      "type": "shell",
+      "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m pytest tests --no-header -q",
+      "options": {
+        "cwd": "${workspaceFolder}\\orchestrator",
+        "env": {
+          "PATH": "C:\\Users\\jh\\msys64\\clang64\\bin;C:\\Users\\jh\\msys64\\mingw64\\bin;C:\\Users\\jh\\msys64\\usr\\bin;${env:PATH}"
+        }
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "dev: build + test",
+      "dependsOn": ["build: controller_agent", "test: pytest P0"],
+      "dependsOrder": "sequence",
+      "group": { "kind": "build", "isDefault": true }
+    }
+  ]
+}

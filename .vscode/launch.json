@@ -1,0 +1,42 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Pytest: P0 全量（调试）",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "cwd": "${workspaceFolder}/orchestrator",
+      "console": "integratedTerminal",
+      "env": {
+        "PATH": "C:\\Users\\jh\\msys64\\clang64\\bin;C:\\Users\\jh\\msys64\\mingw64\\bin;C:\\Users\\jh\\msys64\\usr\\bin;${env:PATH}"
+      },
+      "args": ["tests", "-v"],
+      "justMyCode": false
+    },
+    {
+      "name": "Pytest: 单个用例（调试）",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "pytest",
+      "cwd": "${workspaceFolder}/orchestrator",
+      "console": "integratedTerminal",
+      "env": {
+        "PATH": "C:\\Users\\jh\\msys64\\clang64\\bin;C:\\Users\\jh\\msys64\\mingw64\\bin;C:\\Users\\jh\\msys64\\usr\\bin;${env:PATH}"
+      },
+      "args": ["tests/test_p0_core.py::test_position_accuracy", "-v"],
+      "justMyCode": false
+    },
+    {
+      "name": "Python: 当前文件",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${file}",
+      "console": "integratedTerminal",
+      "env": {
+        "PATH": "C:\\Users\\jh\\msys64\\clang64\\bin;C:\\Users\\jh\\msys64\\mingw64\\bin;C:\\Users\\jh\\msys64\\usr\\bin;${env:PATH}"
+      },
+      "justMyCode": false
+    }
+  ]
+}
