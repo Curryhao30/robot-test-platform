@@ -35,7 +35,18 @@ jobs:
           .venv/bin/pip install -r orchestrator/requirements.txt
 
       - name: Configure CMake
-        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+        run: |
+          set +e
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release 2>&1 | tee /tmp/cmake_config.log
+          echo "configure_exit=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+      - name: Surface configure failure
+        if: env.configure_exit != '0'
+        run: |
+          mkdir -p reports
+          cp /tmp/cmake_config.log reports/cmake_config.log
+          tail -n 80 /tmp/cmake_config.log
+          exit 1
 
       - name: Build C++ Controller Agent
         run: cmake --build build --target controller_agent -j "$(nproc)"
