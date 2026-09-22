@@ -132,12 +132,14 @@ class ControllerClient:
 
     # -- 工具 --------------------------------------------------------------
     def wait_ready(self, timeout_s: float = 15.0) -> bool:
+        self._last_ready_error = ""
         deadline = time.time() + timeout_s
         while time.time() < deadline:
             try:
                 self.get_state()
                 return True
-            except grpc.RpcError:
+            except grpc.RpcError as e:
+                self._last_ready_error = f"{e.code().name}: {e.details()}"
                 time.sleep(0.2)
         return False
 

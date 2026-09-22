@@ -47,7 +47,8 @@ def client(profile) -> ControllerClient:
                 out = f.read(4000)
         except Exception:
             out = ""
-        pytest.fail(f"controller_agent 未就绪，日志 {log_path}: {out}")
+        err = getattr(c, "_last_ready_error", "")
+        pytest.fail(f"controller_agent 未就绪（最后错误: {err}），日志 {log_path}: {out}")
     yield c
     c.close()
     if proc.poll() is None:

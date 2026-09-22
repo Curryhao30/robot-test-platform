@@ -99,7 +99,14 @@ jobs:
         run: |
           mkdir -p reports
           cp /tmp/pytest.log reports/pytest.log
-          tail -n 50 /tmp/pytest.log | sed 's/^/::error::/'
+          echo "::group::pytest tail"
+          tail -n 50 /tmp/pytest.log
+          echo "::endgroup::"
+          echo "::group::agent.log tail"
+          tail -n 30 reports/agent.log 2>/dev/null || true
+          echo "::endgroup::"
+          tail -n 35 /tmp/pytest.log | sed 's/^/::error::/'
+          tail -n 15 reports/agent.log 2>/dev/null | sed 's/^/::error::agent/'
           exit 1
 
       - name: Upload test report
