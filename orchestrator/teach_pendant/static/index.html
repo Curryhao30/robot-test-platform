@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Virtual Teach Pendant | MAiRA-SIM</title>
+<style>
+  :root {
+    --bg: #1b1f24; --panel: #242a31; --line: #39424d;
+    --text: #d7dde3; --dim: #8b96a1; --accent: #2f9e6e;
+    --alarm: #d9534f; --warn: #e6a23c;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text);
+         font: 14px/1.5 "Segoe UI", "Microsoft YaHei", sans-serif;
+         height: 100vh; display: flex; flex-direction: column; }
+  header { padding: 10px 16px; border-bottom: 1px solid var(--line);
+           display: flex; align-items: baseline; gap: 12px; }
+  header h1 { font-size: 16px; font-weight: 600; }
+  header .model { color: var(--dim); font-size: 12px; }
+  header .conn { margin-left: auto; font-size: 12px; color: var(--dim); }
+  nav { display: flex; gap: 4px; padding: 8px 16px 0; }
+  nav button { background: var(--panel); color: var(--dim); border: 1px solid var(--line);
+               padding: 6px 18px; cursor: pointer; font-size: 13px; }
+  nav button.active { color: var(--text); border-bottom-color: var(--bg);
+                      background: #2a3139; }
+  main { flex: 1; overflow: auto; padding: 14px 16px; }
+  section { display: none; }
+  section.active { display: block; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+          gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line);
+          border-radius: 6px; padding: 12px; }
+  .card h3 { font-size: 13px; color: var(--dim); margin-bottom: 8px;
+             font-weight: 500; }
+  .axis-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .axis-row .name { width: 34px; color: var(--dim); }
+  .axis-row .val { flex: 1; text-align: right; font-family: Consolas, monospace;
+                   font-size: 15px; background: #15191d; border: 1px solid var(--line);
+                   padding: 4px 8px; border-radius: 4px; min-width: 90px; }
+  .axis-row button { width: 42px; height: 30px; font-size: 15px; cursor: pointer;
+                     background: #2a3139; color: var(--text);
+                     border: 1px solid var(--line); border-radius: 4px; }
+  .axis-row button:hover { border-color: var(--accent); }
+  .row { display: flex; gap: 10px; align-items: center; margin: 10px 0; flex-wrap: wrap; }
+  .btn { padding: 7px 16px; border-radius: 4px; border: 1px solid var(--line);
+         background: #2a3139; color: var(--text); cursor: pointer; font-size: 13px; }
+  .btn:hover { border-color: var(--accent); }
+  .btn.on { background: var(--accent); border-color: var(--accent); color: #0d1210; }
+  .btn.stop { border-color: var(--alarm); color: var(--alarm); }
+  .lamp { display: inline-block; width: 10px; height: 10px; border-radius: 50%;
+          background: #3a434c; margin-right: 6px; }
+  .lamp.on { background: var(--accent); box-shadow: 0 0 6px var(--accent); }
+  .lamp.err { background: var(--alarm); box-shadow: 0 0 6px var(--alarm); }
+  footer { border-top: 1px solid var(--line); padding: 8px 16px;
+           display: flex; gap: 20px; align-items: center; font-size: 12px; }
+  footer .joints { color: var(--dim); font-family: Consolas, monospace; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  .io { display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; }
+  .io .ch { text-align: center; padding: 8px 4px; border: 1px solid var(--line);
+            border-radius: 4px; color: var(--dim); }
+  .io .ch.hi { background: var(--accent); color: #0d1210; }
+  .alarm-item { display: flex; gap: 10px; padding: 8px 10px; border: 1px solid var(--line);
+                border-radius: 4px; margin-bottom: 8px; }
+  .alarm-item .code { color: var(--alarm); font-family: Consolas, monospace; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Virtual Teach Pendant</h1>
+  <span class="model" id="model">--</span>
+  <span class="conn" id="conn">connecting...</span>
+</header>
+<nav id="nav">
+  <button data-tab="jog" class="active">Jog</button>
+  <button data-tab="program">Program</button>
+  <button data-tab="io">I/O</button>
+  <button data-tab="robot">Robot</button>
+  <button data-tab="alarm">Alarm</button>
+</nav>
+<main>
+  <!-- Jog -->
+  <section id="tab-jog" class="active">
+    <div class="grid">
+      <div class="card">
+        <h3>关节 Jog（增量步进 ±5°）</h3>
+        <div id="axes"></div>
+      </div>
+      <div class="card">
+        <h3>控制</h3>
+        <div class="row">
+          <span>坐标系</span>
+          <button class="btn" id="coord-joint" data-mode="joint">Joint</button>
+          <button class="btn" id="coord-base">Base</button>
+        </div>
+        <div class="row">
+          <span>速度</span>
+          <input type="range" id="speed" min="10" max="100" value="20" step="10">
+          <span id="speed-label">20%</span>
+        </div>
+        <div class="row">
+          <button class="btn" id="servo-on">Servo ON</button>
+          <button class="btn stop" id="servo-off">Servo OFF</button>
+          <button class="btn stop" id="stop">STOP</button>
+          <button class="btn" id="reset">Reset</button>
+        </div>
+        <div class="row">
+          <span class="lamp" id="lamp-enable"></span>Enable
+          <span class="lamp" id="lamp-moving"></span>Moving
+          <span class="lamp err" id="lamp-error"></span>Error
+        </div>
+      </div>
+    </div>
+  </section>
+  <!-- Program -->
+  <section id="tab-program">
+    <div class="card">
+      <h3>程序列表（P0 预置）</h3>
+      <table id="prog-table">
+        <thead><tr><th>程序</th><th>说明</th><th>目标（deg）</th><th></th></tr></thead>
+        <tbody>
+          <tr data-prog="P1"><td>P1 线性搬运</td><td>7 轴到位</td>
+              <td>[15,-45,90,-15,60,10,-5]</td>
+              <td><button class="btn run-prog">Run</button></td></tr>
+          <tr data-prog="P2"><td>P2 回零</td><td>全部归零</td>
+              <td>[0,0,0,0,0,0,0]</td>
+              <td><button class="btn run-prog">Run</button></td></tr>
+        </tbody>
+      </table>
+      <div class="row"><button class="btn" id="prog-stop">Stop</button></div>
+    </div>
+  </section>
+  <!-- IO -->
+  <section id="tab-io">
+    <div class="card">
+      <h3>虚拟 I/O 面板（P2 接真实 IO / 安全联锁）</h3>
+      <div class="io" id="io-panel"></div>
+      <p style="color:var(--dim);margin-top:8px">当前为静态演示；I/O 读写与安全联锁在 P2 HIL 阶段接入。</p>
+    </div>
+  </section>
+  <!-- Robot -->
+  <section id="tab-robot">
+    <div class="card">
+      <h3>机器人信息</h3>
+      <table id="robot-table"></table>
+    </div>
+  </section>
+  <!-- Alarm -->
+  <section id="tab-alarm">
+    <div class="card">
+      <h3>报警记录</h3>
+      <div id="alarm-list"></div>
+    </div>
+  </section>
+</main>
+<footer>
+  <span>Enable <span class="lamp" id="f-enable"></span></span>
+  <span>Moving <span class="lamp" id="f-moving"></span></span>
+  <span class="joints" id="f-joints">--</span>
+</footer>
+<script>
+"use strict";
+const $ = (s) => document.querySelector(s);
+const AXIS = ["J1", "J2", "J3", "J4", "J5", "J6", "J7"];
+const PROGRAMS = {
+  P1: [15, -45, 90, -15, 60, 10, -5],
+  P2: [0, 0, 0, 0, 0, 0, 0],
+};
+
+function buildAxes() {
+  const box = $("#axes");
+  box.innerHTML = "";
+  AXIS.forEach((name, i) => {
+    const row = document.createElement("div");
+    row.className = "axis-row";
+    row.innerHTML =
+      '<span class="name">' + name + '</span>' +
+      '<button data-axis="' + i + '" data-dir="-1">-</button>' +
+      '<span class="val" id="val-' + i + '">0.00</span>' +
+      '<button data-axis="' + i + '" data-dir="1">+</button>';
+    box.appendChild(row);
+  });
+  box.querySelectorAll("button[data-axis]").forEach((b) => {
+    b.addEventListener("click", () => jog(Number(b.dataset.axis), Number(b.dataset.dir)));
+  });
+}
+
+function buildIo() {
+  const panel = $("#io-panel");
+  panel.innerHTML = "";
+  for (let i = 0; i < 8; i++) {
+    const ch = document.createElement("div");
+    ch.className = "ch";
+    ch.id = "di-" + i;
+    ch.textContent = "DI" + i;
+    panel.appendChild(ch);
+  }
+  for (let i = 0; i < 8; i++) {
+    const ch = document.createElement("div");
+    ch.className = "ch";
+    ch.id = "do-" + i;
+    ch.textContent = "DO" + i;
+    panel.appendChild(ch);
+  }
+}
+
+function renderRobot(info) {
+  $("#robot-table").innerHTML =
+    "<tr><td>型号</td><td>" + info.name + "</td></tr>" +
+    "<tr><td>自由度</td><td>" + info.dof + " 轴</td></tr>" +
+    "<tr><td>控制周期</td><td>" + info.cycle_hz + " Hz</td></tr>";
+  $("#model").textContent = info.name + " | " + info.dof + " DOF";
+}
+
+async function api(path, body) {
+  const opt = body === undefined ? {} : {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  };
+  const r = await fetch(path, opt);
+  return r.json();
+}
+
+async function jog(axis, dir) {
+  const speed = Number($("#speed").value);
+  const r = await api("/api/jog", { joint: axis, direction: dir, speed_pct: speed });
+  if (!r.ok) flashAlarm(r);
+}
+
+function flashAlarm(r) {
+  // 让 Alarm tab 弹出错误，模拟示教器报警
+  const list = $("#alarm-list");
+  const item = document.createElement("div");
+  item.className = "alarm-item";
+  item.innerHTML = '<span class="code">ERR-' + (r.error_code ?? "?") + '</span>' +
+                   '<span>' + (r.error_message || "操作失败") + '</span>';
+  list.prepend(item);
+  switchTab("alarm");
+}
+
+async function poll() {
+  try {
+    const st = await api("/api/status");
+    $("#conn").textContent = "connected @ " + st.motion_state;
+    AXIS.forEach((_, i) => {
+      const v = $("#val-" + i);
+      if (v) v.textContent = st.joints[i].toFixed(2);
+    });
+    const setLamp = (id, on, err) => {
+      const el = $(id);
+      el.className = "lamp" + (on ? (err ? " err" : " on") : "");
+    };
+    setLamp("#lamp-enable", st.enabled);
+    setLamp("#lamp-moving", st.moving);
+    setLamp("#lamp-error", st.error, true);
+    setLamp("#f-enable", st.enabled);
+    setLamp("#f-moving", st.moving);
+    $("#f-joints").textContent = "J1..J7: " + st.joints.map((v) => v.toFixed(1)).join(" / ");
+    if (st.error) {
+      const list = $("#alarm-list");
+      if (list.childElementCount === 0) {
+        const item = document.createElement("div");
+        item.className = "alarm-item";
+        item.innerHTML = '<span class="code">ERR-' + st.error_code + '</span>' +
+                         '<span>' + (st.error_message || "controller error") + '</span>';
+        list.prepend(item);
+      }
+    }
+  } catch (e) {
+    $("#conn").textContent = "disconnected";
+  }
+}
+
+function switchTab(name) {
+  document.querySelectorAll("nav button").forEach((b) => {
+    b.classList.toggle("active", b.dataset.tab === name);
+  });
+  document.querySelectorAll("main section").forEach((s) => {
+    s.classList.toggle("active", s.id === "tab-" + name);
+  });
+}
+
+document.querySelectorAll("nav button").forEach((b) => {
+  b.addEventListener("click", () => switchTab(b.dataset.tab));
+});
+$("#servo-on").addEventListener("click", async () => {
+  const r = await api("/api/servo", { on: true });
+  if (!r.ok) flashAlarm(r);
+});
+$("#servo-off").addEventListener("click", async () => {
+  const r = await api("/api/servo", { on: false });
+  if (!r.ok) flashAlarm(r);
+});
+$("#stop").addEventListener("click", async () => { await api("/api/stop"); });
+$("#reset").addEventListener("click", async () => { await api("/api/reset"); });
+$("#prog-stop").addEventListener("click", async () => { await api("/api/stop"); });
+document.querySelectorAll(".run-prog").forEach((b) => {
+  b.addEventListener("click", async () => {
+    const prog = b.closest("tr").dataset.prog;
+    const r = await api("/api/move_absolute", { target: PROGRAMS[prog] });
+    if (!r.ok) flashAlarm(r);
+  });
+});
+$("#speed").addEventListener("input", () => {
+  $("#speed-label").textContent = $("#speed").value + "%";
+});
+
+(async function init() {
+  buildAxes();
+  buildIo();
+  try {
+    const info = await api("/api/info");
+    renderRobot(info);
+  } catch (e) { /* backend not up yet */ }
+  poll();
+  setInterval(poll, 500);
+})();
+</script>
+</body>
+</html>

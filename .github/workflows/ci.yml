@@ -34,6 +34,10 @@ jobs:
           .venv/bin/pip install --upgrade pip
           .venv/bin/pip install -r orchestrator/requirements.txt
 
+      - name: Install Playwright browser (for Virtual Teach Pendant tests)
+        run: |
+          .venv/bin/python -m playwright install --with-deps chromium
+
       - name: Configure CMake
         run: |
           set +e

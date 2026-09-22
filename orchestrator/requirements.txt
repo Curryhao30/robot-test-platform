@@ -5,3 +5,6 @@ protobuf>=3.20.3,<6.0.0dev
 pytest>=8.0
 PyYAML>=6.0
 numpy>=1.26
+fastapi>=0.110
+uvicorn>=0.27
+playwright>=1.45

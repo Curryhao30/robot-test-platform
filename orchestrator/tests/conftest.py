@@ -4,8 +4,10 @@
 """
 from __future__ import annotations
 
+import os
 import pathlib
 import socket
+import subprocess
 import sys
 import time
 
@@ -171,3 +173,74 @@ def pytest_runtest_makereport(item, call):
             detail = (detail + "\n" + str(rep.longrepr).strip()).strip()
         _context.add(name, status, detail=detail,
                      duration_s=getattr(rep, "duration", 0.0))
+
+
+# ---------------------------------------------------------------------------
+# Virtual Teach Pendant：FastAPI 后端（uvicorn 子进程）+ Playwright 浏览器
+# ---------------------------------------------------------------------------
+TP_PORTS = [58081, 58082, 58083]
+
+
+@pytest.fixture(scope="session")
+def teach_url(client, profile) -> str:
+    """启动示教器后端（uvicorn 子进程，复用 agent 的 gRPC 通道）。"""
+    proc = None
+    last_err = ""
+    for port in TP_PORTS:
+        env = dict(os.environ)
+        env["RTP_AGENT_TARGET"] = "127.0.0.1:%d" % _agent_port
+        env["RTP_PROFILE"] = str(profile.source_path)
+        env["RTP_TP_PORT"] = str(port)
+        log = open(str(REPO / "reports" / "teach_api.log"), "wb")
+        proc = subprocess.Popen(
+            [sys.executable, "-m", "uvicorn", "teach_pendant.main:app",
+             "--host", "127.0.0.1", "--port", str(port)],
+            cwd=str(ORCH), env=env, stdout=log, stderr=subprocess.STDOUT,
+        )
+        deadline = time.time() + 15
+        ok = False
+        while time.time() < deadline:
+            if proc.poll() is not None:
+                break
+            try:
+                import urllib.request
+                with urllib.request.urlopen(
+                        "http://127.0.0.1:%d/api/status" % port, timeout=1) as r:
+                    if r.status == 200:
+                        ok = True
+                        break
+            except Exception:
+                time.sleep(0.2)
+        if ok:
+            yield "http://127.0.0.1:%d" % port
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except Exception:
+                proc.kill()
+            return
+        last_err = "teach api 端口 %d 未就绪" % port
+        proc.kill()
+        proc.wait(timeout=3)
+    log.close()
+    pytest.fail("示教器后端启动失败: %s" % last_err)
+
+
+@pytest.fixture(scope="session")
+def pw_browser():
+    """Playwright Chromium；本机无 chromium 时回退系统 Edge（Windows）。"""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError as e:
+        pytest.fail("未安装 playwright: %s" % e)
+    with sync_playwright() as p:
+        browser = None
+        try:
+            browser = p.chromium.launch()
+        except Exception:
+            try:
+                browser = p.chromium.launch(channel="msedge")
+            except Exception:
+                pytest.fail("Playwright 无法启动 chromium 或 msedge")
+        yield browser
+        browser.close()
