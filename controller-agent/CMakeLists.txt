@@ -12,7 +12,13 @@ endif()
 set(PROTO_SRC ${CMAKE_CURRENT_SOURCE_DIR}/../proto/controller.proto)
 set(GEN_DIR ${CMAKE_CURRENT_BINARY_DIR}/generated)
 file(MAKE_DIRECTORY ${GEN_DIR})
-get_target_property(GRPC_CPP_PLUGIN gRPC::grpc_cpp_plugin LOCATION)
+# gRPC C++ 插件：优先取 CMake target（上游 gRPC ≥1.30 导出）；
+# Debian/Ubuntu 打包的 gRPC 可能不导出该 target，回退到 find_program（protoc-gen-grpc）
+if(TARGET gRPC::grpc_cpp_plugin)
+  get_target_property(GRPC_CPP_PLUGIN gRPC::grpc_cpp_plugin LOCATION)
+else()
+  find_program(GRPC_CPP_PLUGIN NAMES grpc_cpp_plugin protoc-gen-grpc REQUIRED)
+endif()
 
 add_custom_command(
   OUTPUT ${GEN_DIR}/controller.pb.cc ${GEN_DIR}/controller.pb.h
