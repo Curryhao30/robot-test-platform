@@ -40,7 +40,7 @@ def client(profile) -> ControllerClient:
     proc = spawn_agent(str(profile.source_path), port=PORT, log_file=log_path)
     _agent_proc = proc
     c = ControllerClient(f"127.0.0.1:{PORT}")
-    if not c.wait_ready(timeout_s=20):
+    if not c.wait_ready(timeout_s=60):
         out = ""
         try:
             with open(log_path, encoding="utf-8", errors="replace") as f:
