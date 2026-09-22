@@ -33,6 +33,12 @@ struct CycleStats {
     double jitter_max_us = 0.0;
     double jitter_mean_us = 0.0;
     double jitter_std_us = 0.0;
+    // 实时性（P1-3）：单周期交换处理耗时
+    double latency_min_us = 0.0;
+    double latency_max_us = 0.0;
+    double latency_mean_us = 0.0;
+    double latency_std_us = 0.0;
+    int overrun_cycles = 0;      // 处理耗时 > 周期间隔的周期数
 };
 
 class VirtualEthercatBus {

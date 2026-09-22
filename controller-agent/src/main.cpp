@@ -334,6 +334,11 @@ public:
         out->set_jitter_max_us(stats.jitter_max_us);
         out->set_jitter_mean_us(stats.jitter_mean_us);
         out->set_jitter_std_us(stats.jitter_std_us);
+        out->set_latency_min_us(stats.latency_min_us);
+        out->set_latency_max_us(stats.latency_max_us);
+        out->set_latency_mean_us(stats.latency_mean_us);
+        out->set_latency_std_us(stats.latency_std_us);
+        out->set_overrun_cycles(stats.overrun_cycles);
         for (const auto& in : first) {
             auto* p = out->add_first_inputs();
             p->set_slave_id(in.slave_id);

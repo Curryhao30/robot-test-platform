@@ -70,19 +70,44 @@ bool VirtualEthercatBus::run_cycles(const std::vector<PdoOutput>& outputs,
     last_inputs.clear();
 
     std::vector<int64_t> wakes;
+    std::vector<double> processing_us;
     wakes.reserve(static_cast<size_t>(cycles));
+    processing_us.reserve(static_cast<size_t>(cycles));
 
     int64_t deadline = now_ns();
+    int overrun = 0;
     for (int i = 0; i < cycles; ++i) {
         const int64_t t0 = now_ns();
         deadline += interval_ns;
         std::vector<PdoInput> inputs;
         if (!exchange(outputs, inputs)) return false;
+        const int64_t t1 = now_ns();
+        const double proc_us = static_cast<double>(t1 - t0) / 1000.0;
+        processing_us.push_back(proc_us);
+        if (t1 - t0 > interval_ns) ++overrun;
         if (i == 0) first_inputs = std::move(inputs);
         last_inputs = inputs;
         wakes.push_back(t0);
         spin_until(deadline);
     }
+    stats.overrun_cycles = overrun;
+
+    // 单周期交换处理耗时统计（latency：命令发起到输入 PDO 就绪）
+    double lsum = 0.0, lsum2 = 0.0;
+    double lmin = processing_us[0], lmax = processing_us[0];
+    for (double p : processing_us) {
+        lmin = std::min(lmin, p);
+        lmax = std::max(lmax, p);
+        lsum += p;
+        lsum2 += p * p;
+    }
+    const size_t ln = processing_us.size();
+    stats.latency_min_us = lmin;
+    stats.latency_max_us = lmax;
+    stats.latency_mean_us = lsum / static_cast<double>(ln);
+    const double lvar = std::max(0.0, lsum2 / static_cast<double>(ln) -
+                                          stats.latency_mean_us * stats.latency_mean_us);
+    stats.latency_std_us = std::sqrt(lvar);
 
     // 周期间隔 = 相邻 wake 差；第一周期用名义间隔作为基线。
     std::vector<double> jitter_us;

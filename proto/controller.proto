@@ -238,4 +238,11 @@ message RunCyclesResponse {
   repeated SlaveInput first_inputs = 8;
   repeated SlaveInput last_inputs = 9;
   string error = 10;
+  // 实时性量化（P1-3）：单周期交换处理耗时 = 命令发起到输入 PDO 就绪。
+  // 真实系统对应"控制周期内计算/通信延迟"，若超过周期即为 overrun。
+  double latency_min_us = 11;
+  double latency_max_us = 12;
+  double latency_mean_us = 13;
+  double latency_std_us = 14;
+  int32 overrun_cycles = 15;   // 处理耗时 > 周期间隔的周期数（硬实时违规）
 }
