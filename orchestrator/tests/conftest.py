@@ -5,8 +5,8 @@
 from __future__ import annotations
 
 import pathlib
+import socket
 import sys
-import tempfile
 
 import pytest
 
@@ -19,7 +19,15 @@ from app.profile import RobotProfile  # noqa: E402
 from app.report import RunContext, next_run_dir, write_run  # noqa: E402
 from tests import capture  # noqa: E402
 
-PORT = 50051
+def _pick_free_port() -> int:
+    """动态选取空闲端口：固定端口（如 50051）可能被占用且 gRPC
+    AddListeningPort 绑定失败时不抛异常（返回 0），导致"假监听"。"""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(("127.0.0.1", 0))
+        return s.getsockname()[1]
+
+
+PORT = _pick_free_port()
 
 _context: RunContext | None = None
 _run_dir: pathlib.Path | None = None

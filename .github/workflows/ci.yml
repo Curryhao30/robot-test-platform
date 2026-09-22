@@ -59,10 +59,14 @@ jobs:
 
       - name: Probe agent connectivity
         run: |
+          {
+            echo "=== listeners on 50051/50052 ==="
+            ss -ltnp 2>/dev/null | grep -E ':(50051|50052)\b' || echo "(none)"
+          } | tee /tmp/probe_out.txt
           ./build/controller-agent/controller_agent --profile robot_profiles/maira_sim.yaml --port 50052 >/tmp/probe_agent.log 2>&1 &
           AGENT_PID=$!
           sleep 2
-          .venv/bin/python - <<'EOF' 2>&1 | tee /tmp/probe_out.txt
+          .venv/bin/python - <<'EOF' 2>&1 | tee -a /tmp/probe_out.txt
           import socket, grpc, sys
           sys.path.insert(0, "orchestrator/generated")
           import controller_pb2 as pb
