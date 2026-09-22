@@ -186,6 +186,9 @@ service EthercatService {
   rpc CycleExchange(CycleExchangeRequest) returns (CycleExchangeResponse);
   // 连续 N 周期（真实计时 + 自旋等待），统计实际频率与周期抖动 jitter
   rpc RunCycles(RunCyclesRequest) returns (RunCyclesResponse);
+  // 异常注入（P1-5）：总线错误 / 从站丢失 / 通信断开
+  rpc InjectBusFault(InjectBusFaultRequest) returns (InjectBusFaultResponse);
+  rpc ClearBusFault(ClearBusFaultRequest) returns (ClearBusFaultResponse);
 }
 
 message BusInfoRequest {}
@@ -207,7 +210,8 @@ message SlaveInput {
   int32 slave_id = 1;
   uint32 statusword = 2;     // 0x6041 映射（Input PDO）
   int32 actual_position = 3; // 0x6064 映射
-  string state = 4;          // 状态机状态名
+  string state = 4;          // 状态机状态名；从站丢失时为 "LOST"
+  bool lost = 5;             // true: 从站已从总线丢失（无响应）
 }
 
 message CycleExchangeRequest {
@@ -245,4 +249,29 @@ message RunCyclesResponse {
   double latency_mean_us = 13;
   double latency_std_us = 14;
   int32 overrun_cycles = 15;   // 处理耗时 > 周期间隔的周期数（硬实时违规）
+}
+
+// 异常注入类型（P1-5）
+enum BusFaultType {
+  BUS_FAULT_NONE = 0;        // 无故障
+  BUS_FAULT_LINK_LOSS = 1;   // 通信断开：整条总线不可用（所有交换失败）
+  BUS_FAULT_SLAVE_LOSS = 2;  // 从站丢失：指定从站无响应（其余正常）
+  BUS_FAULT_BUS_ERROR = 3;   // 总线错误：帧级错误（CRC/看门狗），交换失败
+}
+
+message InjectBusFaultRequest {
+  BusFaultType fault_type = 1;
+  int32 slave_id = 2;        // SLAVE_LOSS 时指定；其余类型忽略
+}
+
+message InjectBusFaultResponse {
+  bool ok = 1;
+  string error = 2;
+}
+
+message ClearBusFaultRequest {}
+
+message ClearBusFaultResponse {
+  bool ok = 1;
+  string error = 2;
 }

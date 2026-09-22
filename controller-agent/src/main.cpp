@@ -288,9 +288,10 @@ public:
             specs.push_back(s);
         }
         std::vector<robottest::PdoInput> inputs;
-        if (!bus_.exchange(specs, inputs)) {
+        std::string xerr;
+        if (!bus_.exchange(specs, inputs, xerr)) {
             out->set_ok(false);
-            out->set_error("invalid slave_id in outputs");
+            out->set_error(xerr.empty() ? "exchange failed" : xerr);
             return grpc::Status::OK;
         }
         out->set_ok(true);
@@ -303,6 +304,7 @@ public:
             p->set_statusword(in.statusword);
             p->set_actual_position(in.actual_position);
             p->set_state(in.state);
+            p->set_lost(in.lost);
         }
         return grpc::Status::OK;
     }
@@ -321,10 +323,11 @@ public:
         }
         robottest::CycleStats stats;
         std::vector<robottest::PdoInput> first, last;
+        std::string xerr;
         if (!bus_.run_cycles(specs, req->cycles(), req->cycle_hz(), stats,
-                             first, last)) {
+                             first, last, xerr)) {
             out->set_ok(false);
-            out->set_error("run_cycles failed (invalid slave or cycles)");
+            out->set_error(xerr.empty() ? "run_cycles failed" : xerr);
             return grpc::Status::OK;
         }
         out->set_ok(true);
@@ -353,6 +356,27 @@ public:
             p->set_actual_position(in.actual_position);
             p->set_state(in.state);
         }
+        return grpc::Status::OK;
+    }
+
+    grpc::Status InjectBusFault(grpc::ServerContext*,
+                                const robottest::InjectBusFaultRequest* req,
+                                robottest::InjectBusFaultResponse* out) override {
+        const auto type = static_cast<robottest::BusFault>(req->fault_type());
+        if (!bus_.inject_fault(type, req->slave_id())) {
+            out->set_ok(false);
+            out->set_error("invalid fault type or slave_id");
+            return grpc::Status::OK;
+        }
+        out->set_ok(true);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status ClearBusFault(grpc::ServerContext*,
+                               const robottest::ClearBusFaultRequest*,
+                               robottest::ClearBusFaultResponse* out) override {
+        bus_.clear_fault();
+        out->set_ok(true);
         return grpc::Status::OK;
     }
 

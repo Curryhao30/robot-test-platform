@@ -33,19 +33,59 @@ VirtualEthercatBus::VirtualEthercatBus(std::vector<VirtualDrive>& drives,
                                        int cycle_hz)
     : drives_(drives), cycle_hz_(cycle_hz) {}
 
+bool VirtualEthercatBus::inject_fault(BusFault type, int slave_id) {
+    if (type < BusFault::kNone || type > BusFault::kBusError) return false;
+    if (type == BusFault::kSlaveLoss &&
+        (slave_id < 0 || slave_id >= static_cast<int>(drives_.size())))
+        return false;
+    fault_type_ = type;
+    fault_slave_ = slave_id;
+    return true;
+}
+
+void VirtualEthercatBus::clear_fault() {
+    fault_type_ = BusFault::kNone;
+    fault_slave_ = -1;
+}
+
 bool VirtualEthercatBus::exchange(const std::vector<PdoOutput>& outputs,
-                                  std::vector<PdoInput>& inputs) {
+                                  std::vector<PdoInput>& inputs,
+                                  std::string& err) {
     inputs.clear();
+    err.clear();
+    // 总线级故障：整条链路不可用
+    if (fault_type_ == BusFault::kLinkLoss) {
+        err = "LINK_LOSS";
+        return false;
+    }
+    if (fault_type_ == BusFault::kBusError) {
+        err = "BUS_ERROR";
+        return false;
+    }
     for (const auto& o : outputs) {
-        if (o.slave_id < 0 || o.slave_id >= static_cast<int>(drives_.size()))
+        if (o.slave_id < 0 || o.slave_id >= static_cast<int>(drives_.size())) {
+            err = "invalid slave_id";
             return false;
+        }
+        // 从站丢失：该从站无响应（LOST），其余从站照常交换
+        if (fault_type_ == BusFault::kSlaveLoss &&
+            o.slave_id == fault_slave_) {
+            PdoInput in;
+            in.slave_id = o.slave_id;
+            in.lost = true;
+            in.state = "LOST";
+            inputs.push_back(in);
+            continue;
+        }
         auto& d = drives_[static_cast<size_t>(o.slave_id)];
         d.set_controlword(o.controlword);
         if (o.write_target) {
-            std::string err;
+            std::string werr;
             if (!d.write_object(Obj::kTargetPosition,
-                                static_cast<uint32_t>(o.target_position), err))
+                                static_cast<uint32_t>(o.target_position), werr)) {
+                err = "target write failed: " + werr;
                 return false;
+            }
         }
         PdoInput in;
         in.slave_id = o.slave_id;
@@ -63,11 +103,16 @@ bool VirtualEthercatBus::run_cycles(const std::vector<PdoOutput>& outputs,
                                     int cycles, int cycle_hz,
                                     CycleStats& stats,
                                     std::vector<PdoInput>& first_inputs,
-                                    std::vector<PdoInput>& last_inputs) {
-    if (cycles <= 0 || cycle_hz <= 0) return false;
+                                    std::vector<PdoInput>& last_inputs,
+                                    std::string& err) {
+    if (cycles <= 0 || cycle_hz <= 0) {
+        err = "invalid cycles/cycle_hz";
+        return false;
+    }
     const int64_t interval_ns = kNanosecondsPerSecond / cycle_hz;
     first_inputs.clear();
     last_inputs.clear();
+    err.clear();
 
     std::vector<int64_t> wakes;
     std::vector<double> processing_us;
@@ -80,7 +125,7 @@ bool VirtualEthercatBus::run_cycles(const std::vector<PdoOutput>& outputs,
         const int64_t t0 = now_ns();
         deadline += interval_ns;
         std::vector<PdoInput> inputs;
-        if (!exchange(outputs, inputs)) return false;
+        if (!exchange(outputs, inputs, err)) return false;
         const int64_t t1 = now_ns();
         const double proc_us = static_cast<double>(t1 - t0) / 1000.0;
         processing_us.push_back(proc_us);

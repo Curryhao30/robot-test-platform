@@ -187,6 +187,18 @@ class ControllerClient:
                 cycles=cycles, cycle_hz=cycle_hz),
             timeout=timeout)
 
+    # -- 总线异常注入（P1-5）-------------------------------------------------
+    def inject_bus_fault(self, fault_type: int, slave_id: int = -1,
+                         timeout: float = 15.0):
+        """注入总线故障：1=LINK_LOSS 2=SLAVE_LOSS 3=BUS_ERROR。"""
+        return self.ethercat.InjectBusFault(
+            pb.InjectBusFaultRequest(fault_type=fault_type, slave_id=slave_id),
+            timeout=timeout)
+
+    def clear_bus_fault(self, timeout: float = 15.0):
+        return self.ethercat.ClearBusFault(pb.ClearBusFaultRequest(),
+                                           timeout=timeout)
+
     # -- 工具 --------------------------------------------------------------
     def wait_ready(self, timeout_s: float = 15.0) -> bool:
         self._last_ready_error = ""
