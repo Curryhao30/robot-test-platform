@@ -85,6 +85,81 @@ message TrajectorySample {
   string motion_state = 3;
 }
 
+// ---------------------------------------------------------------------------
+// 服务：CiA402 驱动器状态机（P1：虚拟从站，纯软件层，软硬件解耦）
+// 每个 slave_id 对应一个驱动器从站（MAiRA 7 轴 = 7 个独立状态机）。
+// 状态机/对象字典按 CiA 402 / IEC 61800-7 语义实现，不依赖真实硬件。
+// ---------------------------------------------------------------------------
+service Cia402Service {
+  // 写 Controlword (0x6040)：驱动状态机迁移（含 Fault Reset 上升沿）
+  rpc SetControlword(SetControlwordRequest) returns (Cia402Result);
+  // 读 Statusword (0x6041) + 状态机状态名
+  rpc GetStatusword(GetStatuswordRequest) returns (GetStatuswordResponse);
+  // 通用 CoE 对象字典读写（0x6040 写走状态机；只读对象拒绝写）
+  rpc ReadObject(ReadObjectRequest) returns (ReadObjectResponse);
+  rpc WriteObject(WriteObjectRequest) returns (WriteObjectResponse);
+  // 设置 Modes of Operation (0x6060)
+  rpc SetMode(SetModeRequest) returns (Cia402Result);
+  // 注入故障（测试辅助：任意状态 -> FaultReactionActive -> Fault）
+  rpc InjectFault(InjectFaultRequest) returns (Cia402Result);
+}
+
+message SetControlwordRequest {
+  int32 slave_id = 1;
+  uint32 controlword = 2; // 0x6040（bit0-3 命令 + bit7 Fault Reset）
+}
+
+message GetStatuswordRequest {
+  int32 slave_id = 1;
+}
+
+message GetStatuswordResponse {
+  bool ok = 1;
+  uint32 statusword = 2; // 0x6041
+  string state = 3;      // 状态机状态名（如 SwitchOnDisabled）
+  string error = 4;
+}
+
+message ReadObjectRequest {
+  int32 slave_id = 1;
+  uint32 index = 2;
+  uint32 subindex = 3;
+}
+
+message ReadObjectResponse {
+  bool ok = 1;
+  uint32 value = 2;
+  string error = 3;
+}
+
+message WriteObjectRequest {
+  int32 slave_id = 1;
+  uint32 index = 2;
+  uint32 subindex = 3;
+  uint32 value = 4;
+}
+
+message WriteObjectResponse {
+  bool ok = 1;
+  string error = 2;
+}
+
+message SetModeRequest {
+  int32 slave_id = 1;
+  uint32 mode = 2; // 0x6060: 1=ProfilePosition 3=ProfileVelocity 6=Homing 8=CSP
+}
+
+message InjectFaultRequest {
+  int32 slave_id = 1;
+}
+
+message Cia402Result {
+  bool ok = 1;
+  string error = 2;
+  uint32 statusword = 3; // 操作后的 0x6041
+  string state = 4;      // 操作后的状态机状态名
+}
+
 message CommandResult {
   bool ok = 1;
   int32 error_code = 2;    // 0=OK 1=NOT_ENABLED 2=JOINT_LIMIT 3=BUSY

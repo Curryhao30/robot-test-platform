@@ -80,6 +80,7 @@ class ControllerClient:
         self.target = target
         self._channel = grpc.insecure_channel(target)
         self.stub = pb_grpc.ControllerServiceStub(self._channel)
+        self.cia402 = pb_grpc.Cia402ServiceStub(self._channel)
 
     # -- PLCopen 指令 ------------------------------------------------------
     def enable(self, timeout: float = 15.0):
@@ -129,6 +130,41 @@ class ControllerClient:
 
     def get_state(self, timeout: float = 15.0):
         return self.stub.GetState(pb.GetStateRequest(), timeout=timeout)
+
+    # -- CiA402 虚拟从站（P1）-----------------------------------------------
+    def set_controlword(self, slave_id: int, controlword: int, timeout: float = 15.0):
+        """写 0x6040 Controlword，驱动状态机迁移。"""
+        return self.cia402.SetControlword(
+            pb.SetControlwordRequest(slave_id=slave_id, controlword=controlword),
+            timeout=timeout)
+
+    def get_statusword(self, slave_id: int, timeout: float = 15.0):
+        """读 0x6041 Statusword + 状态机状态名。"""
+        return self.cia402.GetStatusword(
+            pb.GetStatuswordRequest(slave_id=slave_id), timeout=timeout)
+
+    def read_object(self, slave_id: int, index: int, subindex: int = 0,
+                    timeout: float = 15.0):
+        return self.cia402.ReadObject(
+            pb.ReadObjectRequest(slave_id=slave_id, index=index, subindex=subindex),
+            timeout=timeout)
+
+    def write_object(self, slave_id: int, index: int, value: int, subindex: int = 0,
+                     timeout: float = 15.0):
+        return self.cia402.WriteObject(
+            pb.WriteObjectRequest(slave_id=slave_id, index=index,
+                                  subindex=subindex, value=value),
+            timeout=timeout)
+
+    def set_mode(self, slave_id: int, mode: int, timeout: float = 15.0):
+        """设置 0x6060 Modes of Operation（1=ProfilePosition 6=Homing 8=CSP）。"""
+        return self.cia402.SetMode(
+            pb.SetModeRequest(slave_id=slave_id, mode=mode), timeout=timeout)
+
+    def inject_fault(self, slave_id: int, timeout: float = 15.0):
+        """测试辅助：注入故障 -> FaultReactionActive -> Fault。"""
+        return self.cia402.InjectFault(
+            pb.InjectFaultRequest(slave_id=slave_id), timeout=timeout)
 
     # -- 工具 --------------------------------------------------------------
     def wait_ready(self, timeout_s: float = 15.0) -> bool:

@@ -11,6 +11,7 @@
 #include "controller.grpc.pb.h"
 #include "controller.pb.h"
 #include "robottest/controller_agent.hpp"
+#include "robottest/virtual_drive.hpp"
 
 namespace {
 
@@ -137,6 +138,123 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// gRPC 服务实现：CiA402 虚拟驱动器从站（P1）
+// 挂载在 Controller Agent 内的 7 个 VirtualDrive 上，每个从站独立状态机。
+// ---------------------------------------------------------------------------
+class Cia402ServiceImpl final
+    : public robottest::Cia402Service::Service {
+public:
+    explicit Cia402ServiceImpl(std::vector<robottest::VirtualDrive>& drives)
+        : drives_(drives) {}
+
+    grpc::Status SetControlword(grpc::ServerContext*,
+                                const robottest::SetControlwordRequest* req,
+                                robottest::Cia402Result* out) override {
+        auto* d = drive(req->slave_id());
+        if (!d) return not_found(out);
+        d->set_controlword(static_cast<uint16_t>(req->controlword() & 0xFFFF));
+        fill(out, d);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status GetStatusword(grpc::ServerContext*,
+                               const robottest::GetStatuswordRequest* req,
+                               robottest::GetStatuswordResponse* out) override {
+        auto* d = drive(req->slave_id());
+        if (!d) {
+            out->set_ok(false);
+            out->set_error("slave not found");
+            return grpc::Status::OK;
+        }
+        out->set_ok(true);
+        out->set_statusword(d->statusword());
+        out->set_state(d->state_name());
+        return grpc::Status::OK;
+    }
+
+    grpc::Status ReadObject(grpc::ServerContext*,
+                            const robottest::ReadObjectRequest* req,
+                            robottest::ReadObjectResponse* out) override {
+        auto* d = drive(req->slave_id());
+        if (!d) {
+            out->set_ok(false);
+            out->set_error("slave not found");
+            return grpc::Status::OK;
+        }
+        uint32_t v = 0;
+        if (!d->read_object(static_cast<uint16_t>(req->index()), v)) {
+            out->set_ok(false);
+            out->set_error("read failed (unknown object)");
+            return grpc::Status::OK;
+        }
+        out->set_ok(true);
+        out->set_value(v);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status WriteObject(grpc::ServerContext*,
+                             const robottest::WriteObjectRequest* req,
+                             robottest::WriteObjectResponse* out) override {
+        auto* d = drive(req->slave_id());
+        if (!d) {
+            out->set_ok(false);
+            out->set_error("slave not found");
+            return grpc::Status::OK;
+        }
+        std::string err;
+        if (!d->write_object(static_cast<uint16_t>(req->index()),
+                             req->value(), err)) {
+            out->set_ok(false);
+            out->set_error(err);
+            return grpc::Status::OK;
+        }
+        out->set_ok(true);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status SetMode(grpc::ServerContext*,
+                         const robottest::SetModeRequest* req,
+                         robottest::Cia402Result* out) override {
+        auto* d = drive(req->slave_id());
+        if (!d) return not_found(out);
+        d->set_mode(static_cast<uint8_t>(req->mode() & 0xFF));
+        fill(out, d);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status InjectFault(grpc::ServerContext*,
+                             const robottest::InjectFaultRequest* req,
+                             robottest::Cia402Result* out) override {
+        auto* d = drive(req->slave_id());
+        if (!d) return not_found(out);
+        d->inject_fault();
+        fill(out, d);
+        return grpc::Status::OK;
+    }
+
+private:
+    robottest::VirtualDrive* drive(int id) {
+        if (id < 0 || id >= static_cast<int>(drives_.size())) return nullptr;
+        return &drives_[static_cast<size_t>(id)];
+    }
+
+    static grpc::Status not_found(robottest::Cia402Result* out) {
+        out->set_ok(false);
+        out->set_error("slave not found");
+        return grpc::Status::OK;
+    }
+
+    static void fill(robottest::Cia402Result* out,
+                     const robottest::VirtualDrive* d) {
+        out->set_ok(true);
+        out->set_statusword(d->statusword());
+        out->set_state(d->state_name());
+    }
+
+    std::vector<robottest::VirtualDrive>& drives_;
+};
+
+// ---------------------------------------------------------------------------
 // Profile 加载（与 orchestrator 读取同一份 YAML）
 // ---------------------------------------------------------------------------
 bool load_profile(const std::string& path,
@@ -188,6 +306,13 @@ int main(int argc, char** argv) {
     robottest::ControllerAgent agent(limits, cycle_hz, name);
     agent.start_control_loop();
 
+    // P1：每个关节挂一个 CiA402 虚拟驱动器从站（状态相互独立）
+    std::vector<robottest::VirtualDrive> drives;
+    drives.reserve(limits.size());
+    for (size_t i = 0; i < limits.size(); ++i) {
+        drives.emplace_back(static_cast<int>(i));
+    }
+
     const std::string addr = "0.0.0.0:" + std::to_string(port);
     grpc::ServerBuilder builder;
     int actual = port;
@@ -198,7 +323,9 @@ int main(int argc, char** argv) {
     // 机器可读行：客户端从 stdout 解析真实监听端口
     std::cout << "[agent] PORT=" << actual << std::endl;
     ControllerServiceImpl service(agent);
+    Cia402ServiceImpl cia402_service(drives);
     builder.RegisterService(&service);
+    builder.RegisterService(&cia402_service);
     // 同步服务模型：gRPC 为每个 RPC 分配独立线程池线程，
     // 长耗时 MoveAbsolute 不阻塞并发 Stop/GetState，无需显式 completion queue。
     // （此前 AddCompletionQueue 在本机 clang+mingw64 工具链上触发崩溃，已移除）
@@ -210,6 +337,7 @@ int main(int argc, char** argv) {
     std::cout << "Controller    : Simulation" << std::endl;
     std::cout << "Cycle         : " << cycle_hz << " Hz" << std::endl;
     std::cout << "Dof           : " << limits.size() << std::endl;
+    std::cout << "Cia402Slaves  : " << drives.size() << std::endl;
     std::cout << "Listening     : " << addr << std::endl;
     std::cout << "========================================================="
               << std::endl;
