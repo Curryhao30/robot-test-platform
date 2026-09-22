@@ -40,17 +40,16 @@ add_custom_command(
   COMMENT "Generating gRPC/protobuf C++ stubs"
 )
 
-# gRPC 1.55 起 AddListeningPort 签名改变（fluent API + out 参数）
-if(gRPC_VERSION VERSION_LESS "1.55")
-  target_compile_definitions(controller_agent PRIVATE GRPC_OLD_ADDLISTENINGPORT)
-endif()
-
 add_executable(controller_agent
   src/main.cpp
   src/controller_agent.cpp
   ${GEN_DIR}/controller.pb.cc
   ${GEN_DIR}/controller.grpc.pb.cc
 )
+# gRPC 1.55 起 AddListeningPort 签名改变（fluent API + out 参数）
+if(gRPC_VERSION VERSION_LESS "1.55")
+  target_compile_definitions(controller_agent PRIVATE GRPC_OLD_ADDLISTENINGPORT)
+endif()
 target_include_directories(controller_agent PRIVATE
   include
   ${GEN_DIR}
