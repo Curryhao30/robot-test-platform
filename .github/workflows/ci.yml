@@ -109,6 +109,10 @@ jobs:
           echo "::group::agent.log tail"
           tail -n 30 reports/agent.log 2>/dev/null || true
           echo "::endgroup::"
+          echo "--- agent process check ---"
+          ps aux | grep -F 'controller_agent' | grep -v grep || echo "NO agent process alive"
+          echo "--- listeners on 5xxxx ---"
+          ss -ltnp 2>/dev/null | grep -E ':(5005[0-9]|36229)\b' || echo "NO listeners"
           tail -n 35 /tmp/pytest.log | sed 's/^/::error::/'
           tail -n 15 reports/agent.log 2>/dev/null | sed 's/^/::error::agent/'
           exit 1
