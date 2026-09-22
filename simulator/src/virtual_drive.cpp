@@ -27,6 +27,16 @@ bool VirtualDrive::write_object(uint16_t index, uint32_t value, std::string& err
         set_mode(static_cast<uint8_t>(value & 0xFF));
         return true;
     }
+    if (index == Obj::kTargetPosition) {
+        // 虚拟位置环直通：目标位置立即反映到实际位置（0x607A -> 0x6064）。
+        // 不涉及运动学；后续挂真实伺服时由驱动闭环回读。
+        if (!od_.write(index, value)) {
+            err = "write failed";
+            return false;
+        }
+        od_.set(Obj::kPositionActual, value);
+        return true;
+    }
     if (!od_.write(index, value)) {
         err = (od_.read(index, value) ? "read-only object"
                                       : "unknown object index");

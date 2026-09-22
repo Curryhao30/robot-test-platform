@@ -81,6 +81,7 @@ class ControllerClient:
         self._channel = grpc.insecure_channel(target)
         self.stub = pb_grpc.ControllerServiceStub(self._channel)
         self.cia402 = pb_grpc.Cia402ServiceStub(self._channel)
+        self.ethercat = pb_grpc.EthercatServiceStub(self._channel)
 
     # -- PLCopen 指令 ------------------------------------------------------
     def enable(self, timeout: float = 15.0):
@@ -165,6 +166,26 @@ class ControllerClient:
         """测试辅助：注入故障 -> FaultReactionActive -> Fault。"""
         return self.cia402.InjectFault(
             pb.InjectFaultRequest(slave_id=slave_id), timeout=timeout)
+
+    # -- EtherCAT 虚拟总线（P1-2）-------------------------------------------
+    def bus_info(self, timeout: float = 15.0):
+        return self.ethercat.BusInfo(pb.BusInfoRequest(), timeout=timeout)
+
+    def cycle_exchange(self, outputs: list[dict], timeout: float = 15.0):
+        """单周期 PDO 交换。outputs: [{"slave_id","controlword","target_position"}...]"""
+        return self.ethercat.CycleExchange(
+            pb.CycleExchangeRequest(
+                outputs=[pb.SlaveOutput(**o) for o in outputs]),
+            timeout=timeout)
+
+    def run_cycles(self, outputs: list[dict], cycles: int, cycle_hz: int,
+                   timeout: float = 60.0):
+        """连续 N 周期真实计时交换，返回实际频率 + 周期抖动 jitter。"""
+        return self.ethercat.RunCycles(
+            pb.RunCyclesRequest(
+                outputs=[pb.SlaveOutput(**o) for o in outputs],
+                cycles=cycles, cycle_hz=cycle_hz),
+            timeout=timeout)
 
     # -- 工具 --------------------------------------------------------------
     def wait_ready(self, timeout_s: float = 15.0) -> bool:

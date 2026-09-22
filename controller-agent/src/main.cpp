@@ -1,5 +1,6 @@
 // controller_agent 主程序
 // 用法: controller_agent --profile <robot_profiles/maira_sim.yaml> [--port 50051]
+#include <chrono>
 #include <csignal>
 #include <iostream>
 #include <string>
@@ -12,6 +13,7 @@
 #include "controller.pb.h"
 #include "robottest/controller_agent.hpp"
 #include "robottest/virtual_drive.hpp"
+#include "robottest/virtual_ethercat.hpp"
 
 namespace {
 
@@ -255,6 +257,105 @@ private:
 };
 
 // ---------------------------------------------------------------------------
+// gRPC 服务实现：EtherCAT 虚拟总线（P1-2）
+// 把 VirtualEthercatBus 的周期过程数据交换暴露给测试编排层。
+// ---------------------------------------------------------------------------
+class EthercatServiceImpl final
+    : public robottest::EthercatService::Service {
+public:
+    explicit EthercatServiceImpl(robottest::VirtualEthercatBus& bus)
+        : bus_(bus) {}
+
+    grpc::Status BusInfo(grpc::ServerContext*,
+                         const robottest::BusInfoRequest*,
+                         robottest::BusInfoResponse* out) override {
+        out->set_ok(true);
+        out->set_slave_count(bus_.slave_count());
+        out->set_cycle_hz(bus_.cycle_hz());
+        return grpc::Status::OK;
+    }
+
+    grpc::Status CycleExchange(grpc::ServerContext*,
+                               const robottest::CycleExchangeRequest* req,
+                               robottest::CycleExchangeResponse* out) override {
+        std::vector<robottest::PdoOutput> specs;
+        for (const auto& o : req->outputs()) {
+            robottest::PdoOutput s;
+            s.slave_id = o.slave_id();
+            s.controlword = static_cast<uint16_t>(o.controlword() & 0xFFFF);
+            s.write_target = o.target_position() != 0;
+            s.target_position = o.target_position();
+            specs.push_back(s);
+        }
+        std::vector<robottest::PdoInput> inputs;
+        if (!bus_.exchange(specs, inputs)) {
+            out->set_ok(false);
+            out->set_error("invalid slave_id in outputs");
+            return grpc::Status::OK;
+        }
+        out->set_ok(true);
+        out->set_timestamp_ns(
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::steady_clock::now().time_since_epoch()).count());
+        for (const auto& in : inputs) {
+            auto* p = out->add_inputs();
+            p->set_slave_id(in.slave_id);
+            p->set_statusword(in.statusword);
+            p->set_actual_position(in.actual_position);
+            p->set_state(in.state);
+        }
+        return grpc::Status::OK;
+    }
+
+    grpc::Status RunCycles(grpc::ServerContext*,
+                           const robottest::RunCyclesRequest* req,
+                           robottest::RunCyclesResponse* out) override {
+        std::vector<robottest::PdoOutput> specs;
+        for (const auto& o : req->outputs()) {
+            robottest::PdoOutput s;
+            s.slave_id = o.slave_id();
+            s.controlword = static_cast<uint16_t>(o.controlword() & 0xFFFF);
+            s.write_target = o.target_position() != 0;
+            s.target_position = o.target_position();
+            specs.push_back(s);
+        }
+        robottest::CycleStats stats;
+        std::vector<robottest::PdoInput> first, last;
+        if (!bus_.run_cycles(specs, req->cycles(), req->cycle_hz(), stats,
+                             first, last)) {
+            out->set_ok(false);
+            out->set_error("run_cycles failed (invalid slave or cycles)");
+            return grpc::Status::OK;
+        }
+        out->set_ok(true);
+        out->set_cycles(req->cycles());
+        out->set_actual_hz(stats.actual_hz);
+        out->set_jitter_min_us(stats.jitter_min_us);
+        out->set_jitter_max_us(stats.jitter_max_us);
+        out->set_jitter_mean_us(stats.jitter_mean_us);
+        out->set_jitter_std_us(stats.jitter_std_us);
+        for (const auto& in : first) {
+            auto* p = out->add_first_inputs();
+            p->set_slave_id(in.slave_id);
+            p->set_statusword(in.statusword);
+            p->set_actual_position(in.actual_position);
+            p->set_state(in.state);
+        }
+        for (const auto& in : last) {
+            auto* p = out->add_last_inputs();
+            p->set_slave_id(in.slave_id);
+            p->set_statusword(in.statusword);
+            p->set_actual_position(in.actual_position);
+            p->set_state(in.state);
+        }
+        return grpc::Status::OK;
+    }
+
+private:
+    robottest::VirtualEthercatBus& bus_;
+};
+
+// ---------------------------------------------------------------------------
 // Profile 加载（与 orchestrator 读取同一份 YAML）
 // ---------------------------------------------------------------------------
 bool load_profile(const std::string& path,
@@ -313,6 +414,9 @@ int main(int argc, char** argv) {
         drives.emplace_back(static_cast<int>(i));
     }
 
+    // P1-2：虚拟 EtherCAT 总线（周期 PDO 交换），驱动 7 个从站
+    robottest::VirtualEthercatBus bus(drives, cycle_hz);
+
     const std::string addr = "0.0.0.0:" + std::to_string(port);
     grpc::ServerBuilder builder;
     int actual = port;
@@ -324,8 +428,10 @@ int main(int argc, char** argv) {
     std::cout << "[agent] PORT=" << actual << std::endl;
     ControllerServiceImpl service(agent);
     Cia402ServiceImpl cia402_service(drives);
+    EthercatServiceImpl ethercat_service(bus);
     builder.RegisterService(&service);
     builder.RegisterService(&cia402_service);
+    builder.RegisterService(&ethercat_service);
     // 同步服务模型：gRPC 为每个 RPC 分配独立线程池线程，
     // 长耗时 MoveAbsolute 不阻塞并发 Stop/GetState，无需显式 completion queue。
     // （此前 AddCompletionQueue 在本机 clang+mingw64 工具链上触发崩溃，已移除）
@@ -338,6 +444,8 @@ int main(int argc, char** argv) {
     std::cout << "Cycle         : " << cycle_hz << " Hz" << std::endl;
     std::cout << "Dof           : " << limits.size() << std::endl;
     std::cout << "Cia402Slaves  : " << drives.size() << std::endl;
+    std::cout << "EthercatBus   : Virtual PDO @" << cycle_hz << " Hz"
+              << std::endl;
     std::cout << "Listening     : " << addr << std::endl;
     std::cout << "========================================================="
               << std::endl;

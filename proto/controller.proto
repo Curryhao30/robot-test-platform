@@ -171,3 +171,71 @@ message CommandResult {
   int32 sample_count = 7;
   repeated TrajectorySample samples = 8; // C++ 控制环批量采样的轨迹
 }
+
+// ---------------------------------------------------------------------------
+// 服务：EtherCAT 虚拟总线（P1-2：周期过程数据交换 PDO，纯软件层）
+// 主站经总线每周期写 Output PDO（0x6040 Controlword / 0x607A TargetPos），
+// 从站返回 Input PDO（0x6041 Statusword / 0x6064 ActualPos + 状态机名）。
+// 真实硬件替换点：P2 将 VirtualEthercatBus 后端换成 SOEM/IgH 真实主站，
+// 对外 gRPC 接口不变 —— 软硬件解耦。
+// ---------------------------------------------------------------------------
+service EthercatService {
+  // 总线信息（从站数 / 名义控制周期）
+  rpc BusInfo(BusInfoRequest) returns (BusInfoResponse);
+  // 单周期过程数据交换
+  rpc CycleExchange(CycleExchangeRequest) returns (CycleExchangeResponse);
+  // 连续 N 周期（真实计时 + 自旋等待），统计实际频率与周期抖动 jitter
+  rpc RunCycles(RunCyclesRequest) returns (RunCyclesResponse);
+}
+
+message BusInfoRequest {}
+
+message BusInfoResponse {
+  bool ok = 1;
+  int32 slave_count = 2;
+  int32 cycle_hz = 3;
+  string error = 4;
+}
+
+message SlaveOutput {
+  int32 slave_id = 1;
+  uint32 controlword = 2;    // 0x6040 映射（Output PDO）
+  int32 target_position = 3; // 0x607A 映射；=0 表示不写入
+}
+
+message SlaveInput {
+  int32 slave_id = 1;
+  uint32 statusword = 2;     // 0x6041 映射（Input PDO）
+  int32 actual_position = 3; // 0x6064 映射
+  string state = 4;          // 状态机状态名
+}
+
+message CycleExchangeRequest {
+  repeated SlaveOutput outputs = 1;
+}
+
+message CycleExchangeResponse {
+  bool ok = 1;
+  repeated SlaveInput inputs = 2;
+  int64 timestamp_ns = 3;
+  string error = 4;
+}
+
+message RunCyclesRequest {
+  repeated SlaveOutput outputs = 1;
+  int32 cycles = 2;
+  int32 cycle_hz = 3;
+}
+
+message RunCyclesResponse {
+  bool ok = 1;
+  int32 cycles = 2;
+  double actual_hz = 3;        // 实测平均频率
+  double jitter_min_us = 4;    // 周期抖动 min（us）
+  double jitter_max_us = 5;    // 周期抖动 max（us）
+  double jitter_mean_us = 6;
+  double jitter_std_us = 7;
+  repeated SlaveInput first_inputs = 8;
+  repeated SlaveInput last_inputs = 9;
+  string error = 10;
+}
