@@ -191,25 +191,10 @@ int main(int argc, char** argv) {
     const std::string addr = "0.0.0.0:" + std::to_string(port);
     grpc::ServerBuilder builder;
     int actual = port;
-#ifdef GRPC_OLD_ADDLISTENINGPORT
-    // gRPC < 1.55：AddListeningPort 直接返回绑定端口（0 = 绑定失败，
-    // 且不抛异常——必须显式检查，否则会"假监听"）
-    const int selected = builder.AddListeningPort(
-        addr, grpc::InsecureServerCredentials());
-    if (selected == 0) {
-        std::cerr << "[agent] FATAL: failed to bind " << addr
-                  << " (AddListeningPort returned 0)" << std::endl;
-        agent.stop_control_loop();
-        return 3;
-    }
-    actual = selected;
-#else
-    // gRPC >= 1.55：fluent API。注意部分版本（如 mingw64 1.82）的
-    // selected_port out 参数不返回实际端口（恒为 0），不能据此判定失败；
-    // 真实监听由客户端 wait_ready 验证。
-    builder.AddListeningPort(addr, grpc::InsecureServerCredentials(),
-                             &actual);
-#endif
+    // gRPC fluent API（≥1.51）的 selected_port 输出参数在各版本语义不一致
+    // （部分版本不返回实际端口），因此不做绑定结果检查——真实监听由客户端
+    // wait_ready 验证；绑定失败表现为客户端连不上，由 conftest 候选端口重试吸收。
+    builder.AddListeningPort(addr, grpc::InsecureServerCredentials(), &actual);
     // 机器可读行：客户端从 stdout 解析真实监听端口
     std::cout << "[agent] PORT=" << actual << std::endl;
     ControllerServiceImpl service(agent);
