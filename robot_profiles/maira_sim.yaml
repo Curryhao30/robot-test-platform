@@ -1,0 +1,46 @@
+# =============================================================================
+# 华沿机器人测试平台 - Robot Profile
+# 文件：maira_sim.yaml
+# 说明：MAiRA-like 仿真 Profile（P0 用）。
+#       注意：本文件为"仿真用"配置，刻意使用与官方规格相似的量级，
+#       但【不是】华沿官方公布的内部控制器参数，避免误导。
+#       后续如需真实机型，另行建立 huayan_maira_public.yaml 等公开规格 Profile。
+# =============================================================================
+name: maira_sim
+manufacturer: huayan
+model: MAiRA-SIM-7DOF
+note: "仿真 Profile，非官方参数；P0 用于控制环/状态机/轨迹判定验证"
+dof: 7
+
+controller:
+  cycle_hz: 1000          # 控制周期（S/Li 系列 1000Hz 量级；Elfin-Pro 最高 2000Hz，可参数化）
+  stop_behavior: immediate_stop
+
+joints:
+  - limits: { position: [-175, 175], velocity: 120, acceleration: 300, jerk: 1000 }
+  - limits: { position: [-120, 120], velocity: 120, acceleration: 300, jerk: 1000 }
+  - limits: { position: [-175, 175], velocity: 150, acceleration: 300, jerk: 1000 }
+  - limits: { position: [-120, 120], velocity: 150, acceleration: 300, jerk: 1000 }
+  - limits: { position: [-175, 175], velocity: 180, acceleration: 300, jerk: 1000 }
+  - limits: { position: [-120, 120], velocity: 180, acceleration: 300, jerk: 1000 }
+  - limits: { position: [-175, 175], velocity: 180, acceleration: 300, jerk: 1000 }
+
+motion:
+  interpolation: [joint]       # P0 仅 PTP；linear/circular 后续阶段
+  accel_model: trapezoidal     # 梯形速度剖面，P0
+
+accuracy:
+  position_tolerance_deg: 0.01     # 终位判定阈值（示例值，可按机型参数化）
+  velocity_overshoot_tolerance: 0.05  # 速度峰值允许的 5% 余量
+
+interfaces:
+  modbus_tcp: true
+  ethercat: false
+  can: true
+
+drive:
+  profile: cia402
+
+teach_pendant:
+  resolution: "1280x800"
+  size_inch: 10.5

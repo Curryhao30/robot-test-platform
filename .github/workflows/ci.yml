@@ -1,0 +1,57 @@
+# CI：push / PR 到 main 时自动构建 C++ Controller Agent 并运行 P0 测试
+# 链路：cmake 构建 -> 生成 gRPC 桩 -> pytest（自动拉起 agent）-> 上传报告
+name: CI - Build & Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install C++ dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            cmake build-essential \
+            libgrpc++-dev libprotobuf-dev protobuf-compiler-grpc \
+            libyaml-cpp-dev
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r orchestrator/requirements.txt
+
+      - name: Configure CMake
+        run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build C++ Controller Agent
+        run: cmake --build build --target controller_agent -j "$(nproc)"
+
+      - name: Generate Python gRPC stubs
+        run: .venv/bin/python scripts/generate_stubs.py
+
+      - name: Run pytest (P0)
+        run: |
+          cd orchestrator
+          ../.venv/bin/python -m pytest -v
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: reports/
+          if-no-files-found: warn

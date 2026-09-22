@@ -1,0 +1,7 @@
+# P0 运行时依赖（Python 3.11）
+grpcio==1.71.0
+grpcio-tools==1.71.0
+protobuf>=3.20.3,<6.0.0dev
+pytest>=8.0
+PyYAML>=6.0
+numpy>=1.26

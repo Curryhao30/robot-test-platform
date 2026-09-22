@@ -1,0 +1,98 @@
+// Robot Controller & Teach Pendant Validation Platform
+// P0: 控制器指令层协议（PLCopen 语义 + 轨迹批量回传）
+// 设计原则：Python 只下发一次命令；C++ Agent 在内部控制环执行并采样，
+// 完成后将 timestamp[]/joint[]/trajectory 批量返回，避免解释器/RPC 影响实时执行。
+syntax = "proto3";
+
+package robottest;
+
+// ---------------------------------------------------------------------------
+// 服务：控制器指令接口
+// ---------------------------------------------------------------------------
+service ControllerService {
+  // 伺服使能 / 去使能
+  rpc Enable(EnableRequest) returns (CommandResult);
+  rpc Disable(DisableRequest) returns (CommandResult);
+  // PLCopen MC_Home（P0：回零运动）
+  rpc Home(HomeRequest) returns (CommandResult);
+  // PLCopen MC_MoveAbsolute / MC_MoveRelative
+  rpc MoveAbsolute(MoveAbsoluteRequest) returns (CommandResult);
+  rpc MoveRelative(MoveRelativeRequest) returns (CommandResult);
+  // 停止（normal=CommandAborted；emergency=Fault，需 Reset 恢复）
+  rpc Stop(StopRequest) returns (CommandResult);
+  rpc Reset(ResetRequest) returns (CommandResult);
+  // 读取当前状态（轮询 / 连接就绪探测）
+  rpc GetState(GetStateRequest) returns (RobotState);
+}
+
+// ---------------------------------------------------------------------------
+// 消息定义
+// ---------------------------------------------------------------------------
+message EnableRequest {}
+message DisableRequest {}
+
+message HomeRequest {
+  double velocity = 1;     // deg/s，各轴按 Profile 限速钳制
+  double acceleration = 2; // deg/s^2
+  double deceleration = 3; // deg/s^2
+}
+
+message MoveAbsoluteRequest {
+  repeated double target_position = 1; // deg，每轴一个
+  double velocity = 2;     // deg/s
+  double acceleration = 3; // deg/s^2
+  double deceleration = 4; // deg/s^2
+  double jerk = 5;         // deg/s^3（P0 暂不参与剖面，保留字段）
+  bool abort_current = 6;  // true: 中止当前运动并下发新命令；false: 忙则报 BUSY
+}
+
+message MoveRelativeRequest {
+  repeated double delta = 1; // deg 增量
+  double velocity = 2;
+  double acceleration = 3;
+  double deceleration = 4;
+  double jerk = 5;
+}
+
+message StopRequest {
+  bool emergency = 1; // true=急停(FAULT) false=普通停止(CommandAborted)
+}
+
+message ResetRequest {}
+
+message GetStateRequest {}
+
+message JointState {
+  double position = 1;     // deg
+  double velocity = 2;     // deg/s
+  double acceleration = 3; // deg/s^2
+}
+
+message RobotState {
+  uint64 timestamp_ns = 1;
+  repeated JointState joints = 2;
+  bool enabled = 3;
+  bool moving = 4;
+  bool error = 5;
+  int32 error_code = 6;
+  string error_message = 7;
+  string motion_state = 8; // IDLE / BUSY / ACTIVE / DONE / ABORTED / ERROR
+}
+
+message TrajectorySample {
+  uint64 timestamp_ns = 1;
+  repeated JointState joints = 2;
+  string motion_state = 3;
+}
+
+message CommandResult {
+  bool ok = 1;
+  int32 error_code = 2;    // 0=OK 1=NOT_ENABLED 2=JOINT_LIMIT 3=BUSY
+                           // 4=ABORTED 5=EMERGENCY_STOP 6=FAULT 7=UNKNOWN
+  string error_message = 3;
+  string command = 4;
+  string motion_state = 5; // 最终状态：DONE / ABORTED / ERROR / IDLE
+  uint64 duration_ms = 6;  // 命令执行墙钟时长
+  int32 sample_count = 7;
+  repeated TrajectorySample samples = 8; // C++ 控制环批量采样的轨迹
+}
