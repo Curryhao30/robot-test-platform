@@ -4,9 +4,10 @@
     {
       "label": "build: controller_agent",
       "type": "shell",
-      "command": "cmake --build R:/build --target controller_agent -j 8",
+      "command": "if (-not (Test-Path 'R:\\')) { subst R: ${workspaceFolder} }; cmake --build R:/build --target controller_agent -j 8",
       "options": {
         "cwd": "${workspaceFolder}",
+        "shell": { "executable": "powershell", "args": ["-NoProfile", "-Command"] },
         "env": {
           "PATH": "C:\\Users\\jh\\msys64\\clang64\\bin;C:\\Users\\jh\\msys64\\mingw64\\bin;C:\\Users\\jh\\msys64\\usr\\bin;${env:PATH}"
         }
@@ -19,6 +20,7 @@
       "command": "${workspaceFolder}\\.venv\\Scripts\\python.exe -m pytest tests --no-header -q",
       "options": {
         "cwd": "${workspaceFolder}\\orchestrator",
+        "shell": { "executable": "powershell", "args": ["-NoProfile", "-Command"] },
         "env": {
           "PATH": "C:\\Users\\jh\\msys64\\clang64\\bin;C:\\Users\\jh\\msys64\\mingw64\\bin;C:\\Users\\jh\\msys64\\usr\\bin;${env:PATH}"
         }
