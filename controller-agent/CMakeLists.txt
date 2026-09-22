@@ -1,5 +1,12 @@
 # C++ Controller Agent：控制环 + PLCopen 状态机 + gRPC 服务
-find_package(Protobuf CONFIG REQUIRED)
+# Protobuf：mingw64 提供 cmake config（CONFIG 模式）；Debian/Ubuntu 的
+# libprotobuf-dev 只装 FindProtobuf.cmake 模块（无 config 文件）。
+# 先 QUIET 试 CONFIG，失败再回退模块模式；两种模式都导出
+# protobuf::libprotobuf / protobuf::protoc target，下游代码无需分支。
+find_package(Protobuf CONFIG QUIET)
+if(NOT Protobuf_FOUND)
+  find_package(Protobuf REQUIRED)
+endif()
 find_package(gRPC CONFIG REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
 
