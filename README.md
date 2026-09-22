@@ -183,7 +183,9 @@ Playwright 端到端 8 用例：五块布局、tab 切换、**Servo ON 真实使
 
 ## 后续阶段（未实现）
 
-- P2：真实 EtherCAT Servo HIL（上层接口已解耦，替换 Robot Adapter 即可）；
-  真实示教器/机器人；FSoE/Safety I/O 联锁；
+- **P2 规划**（详见 `docs/p2-design.md`）：P2.0 Robot Adapter 抽象（配置化切换
+  Simulation/HIL，用例零改动）→ P2.1 真 EtherCAT HIL（SOEM 主站替换虚拟总线，
+  jitter/latency 变真机验收指标）→ P2.2 FSoE 安全联锁（仿真联锁矩阵先行，
+  HIL 验证真实 I/O）→ P2.3 真示教器接入（协议模拟器 / 厂商桥）；
 - 运动学：FK/IK、TCP 轨迹 Oracle、MoveLinear/MoveCircular 路径判定；
 - 管理侧：Requirement→TestCase→TestRun→Defect→Build→Release 可追溯闭环。
