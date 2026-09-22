@@ -35,7 +35,8 @@ def profile() -> RobotProfile:
 def client(profile) -> ControllerClient:
     """启动 C++ Agent 子进程并等待 gRPC 就绪；会话结束自动清理。"""
     global _agent_proc
-    log_fd, log_path = tempfile.mkstemp(prefix="rtp_agent_", suffix=".log")
+    (REPO / "reports").mkdir(parents=True, exist_ok=True)
+    log_path = str(REPO / "reports" / "agent.log")
     proc = spawn_agent(str(profile.source_path), port=PORT, log_file=log_path)
     _agent_proc = proc
     c = ControllerClient(f"127.0.0.1:{PORT}")

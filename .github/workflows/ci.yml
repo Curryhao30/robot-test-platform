@@ -57,6 +57,36 @@ jobs:
       - name: Generate Python gRPC stubs
         run: .venv/bin/python scripts/generate_stubs.py
 
+      - name: Probe agent connectivity
+        run: |
+          ./build/controller-agent/controller_agent --profile robot_profiles/maira_sim.yaml --port 50052 >/tmp/probe_agent.log 2>&1 &
+          AGENT_PID=$!
+          sleep 2
+          .venv/bin/python - <<'EOF' 2>&1 | tee /tmp/probe_out.txt
+          import socket, grpc, sys
+          sys.path.insert(0, "orchestrator/generated")
+          import controller_pb2 as pb
+          import controller_pb2_grpc as pb_grpc
+          try:
+              s = socket.create_connection(("127.0.0.1", 50052), timeout=5)
+              print("PROBE TCP: OK")
+              s.close()
+          except Exception as e:
+              print("PROBE TCP: FAIL", type(e).__name__, e)
+          try:
+              ch = grpc.insecure_channel("127.0.0.1:50052")
+              st = pb_grpc.ControllerServiceStub(ch)
+              r = st.GetState(pb.GetStateRequest(), timeout=5)
+              print("PROBE gRPC: OK enabled=", r.enabled, "motion=", r.motion_state)
+          except Exception as e:
+              print("PROBE gRPC: FAIL", type(e).__name__, e)
+          EOF
+          echo "--- probe agent log ---" >> /tmp/probe_out.txt
+          tail -n 5 /tmp/probe_agent.log >> /tmp/probe_out.txt
+          tail -n 12 /tmp/probe_out.txt | sed 's/^/::notice::/'
+          kill $AGENT_PID 2>/dev/null || true
+          wait $AGENT_PID 2>/dev/null || true
+
       - name: Run pytest (P0)
         run: |
           cd orchestrator
