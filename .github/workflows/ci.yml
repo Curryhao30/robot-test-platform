@@ -60,7 +60,17 @@ jobs:
       - name: Run pytest (P0)
         run: |
           cd orchestrator
-          ../.venv/bin/python -m pytest -v
+          set +e
+          ../.venv/bin/python -m pytest -v 2>&1 | tee /tmp/pytest.log
+          echo "pytest_exit=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
+
+      - name: Surface pytest failure
+        if: env.pytest_exit != '0'
+        run: |
+          mkdir -p reports
+          cp /tmp/pytest.log reports/pytest.log
+          tail -n 50 /tmp/pytest.log | sed 's/^/::error::/'
+          exit 1
 
       - name: Upload test report
         if: always()
