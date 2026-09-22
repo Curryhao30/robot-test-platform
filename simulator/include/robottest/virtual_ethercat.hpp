@@ -48,6 +48,9 @@ struct CycleStats {
     double latency_mean_us = 0.0;
     double latency_std_us = 0.0;
     int overrun_cycles = 0;      // 处理耗时 > 周期间隔的周期数
+    // 逐周期明细（P1-6 波形）：interval_us 长度 = cycles-1，processing_us = cycles
+    std::vector<double> interval_us;
+    std::vector<double> processing_us;
 };
 
 class VirtualEthercatBus {

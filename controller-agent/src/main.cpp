@@ -348,6 +348,7 @@ public:
             p->set_statusword(in.statusword);
             p->set_actual_position(in.actual_position);
             p->set_state(in.state);
+            p->set_lost(in.lost);
         }
         for (const auto& in : last) {
             auto* p = out->add_last_inputs();
@@ -355,7 +356,10 @@ public:
             p->set_statusword(in.statusword);
             p->set_actual_position(in.actual_position);
             p->set_state(in.state);
+            p->set_lost(in.lost);
         }
+        for (double iv : stats.interval_us) out->add_interval_us(iv);
+        for (double pv : stats.processing_us) out->add_processing_us(pv);
         return grpc::Status::OK;
     }
 

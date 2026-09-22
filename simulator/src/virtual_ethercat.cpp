@@ -136,6 +136,11 @@ bool VirtualEthercatBus::run_cycles(const std::vector<PdoOutput>& outputs,
         spin_until(deadline);
     }
     stats.overrun_cycles = overrun;
+    // 逐周期明细（P1-6 波形）
+    stats.processing_us = processing_us;
+    for (size_t i = 1; i < wakes.size(); ++i) {
+        stats.interval_us.push_back(static_cast<double>(wakes[i] - wakes[i - 1]) / 1000.0);
+    }
 
     // 单周期交换处理耗时统计（latency：命令发起到输入 PDO 就绪）
     double lsum = 0.0, lsum2 = 0.0;

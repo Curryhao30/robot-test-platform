@@ -249,6 +249,9 @@ message RunCyclesResponse {
   double latency_mean_us = 13;
   double latency_std_us = 14;
   int32 overrun_cycles = 15;   // 处理耗时 > 周期间隔的周期数（硬实时违规）
+  // 逐周期明细（P1-6 波形可视化）：长度 = cycles - 1（interval）/ cycles（processing）
+  repeated double interval_us = 16;     // 每个实际周期间隔（us），jitter 波形数据
+  repeated double processing_us = 17;   // 每周期单周期处理耗时（us），latency 波形数据
 }
 
 // 异常注入类型（P1-5）
