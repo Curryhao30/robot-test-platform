@@ -45,7 +45,10 @@ jobs:
         run: |
           mkdir -p reports
           cp /tmp/cmake_config.log reports/cmake_config.log
-          tail -n 80 /tmp/cmake_config.log
+          echo "::group::CMake configure output (tail)"
+          tail -n 60 /tmp/cmake_config.log
+          echo "::endgroup::"
+          tail -n 35 /tmp/cmake_config.log | sed 's/^/::error::/'
           exit 1
 
       - name: Build C++ Controller Agent
