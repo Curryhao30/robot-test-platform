@@ -82,17 +82,17 @@ class ControllerClient:
         self.stub = pb_grpc.ControllerServiceStub(self._channel)
 
     # -- PLCopen 指令 ------------------------------------------------------
-    def enable(self):
-        return self.stub.Enable(pb.EnableRequest())
+    def enable(self, timeout: float = 15.0):
+        return self.stub.Enable(pb.EnableRequest(), timeout=timeout)
 
-    def disable(self):
-        return self.stub.Disable(pb.DisableRequest())
+    def disable(self, timeout: float = 15.0):
+        return self.stub.Disable(pb.DisableRequest(), timeout=timeout)
 
     def home(self, velocity: float = 60.0, acceleration: float = 150.0,
-             deceleration: float = 150.0):
+             deceleration: float = 150.0, timeout: float = 15.0):
         return self.stub.Home(
             pb.HomeRequest(velocity=velocity, acceleration=acceleration,
-                           deceleration=deceleration)
+                           deceleration=deceleration), timeout=timeout
         )
 
     def move_absolute(self, target_position: list[float], velocity: float = 60.0,
@@ -114,21 +114,21 @@ class ControllerClient:
 
     def move_relative(self, delta: list[float], velocity: float = 60.0,
                       acceleration: float = 150.0, deceleration: float = 150.0,
-                      jerk: float = 1000.0):
+                      jerk: float = 1000.0, timeout: float = 15.0):
         return self.stub.MoveRelative(
             pb.MoveRelativeRequest(delta=delta, velocity=velocity,
                                    acceleration=acceleration,
-                                   deceleration=deceleration, jerk=jerk)
+                                   deceleration=deceleration, jerk=jerk), timeout=timeout
         )
 
-    def stop(self, emergency: bool = False):
-        return self.stub.Stop(pb.StopRequest(emergency=emergency))
+    def stop(self, emergency: bool = False, timeout: float = 15.0):
+        return self.stub.Stop(pb.StopRequest(emergency=emergency), timeout=timeout)
 
-    def reset(self):
-        return self.stub.Reset(pb.ResetRequest())
+    def reset(self, timeout: float = 15.0):
+        return self.stub.Reset(pb.ResetRequest(), timeout=timeout)
 
-    def get_state(self):
-        return self.stub.GetState(pb.GetStateRequest())
+    def get_state(self, timeout: float = 15.0):
+        return self.stub.GetState(pb.GetStateRequest(), timeout=timeout)
 
     # -- 工具 --------------------------------------------------------------
     def wait_ready(self, timeout_s: float = 15.0) -> bool:
@@ -146,10 +146,12 @@ class ControllerClient:
 
 
 def spawn_agent(profile_path: str, port: int = 50051,
-                exe: str | None = None) -> subprocess.Popen:
+                exe: str | None = None,
+                log_file: str | None = None) -> subprocess.Popen:
     """拉起 C++ Controller Agent 子进程（供 pytest 使用）。
 
     exe 解析顺序：显式参数 > 环境变量 RTP_AGENT_BIN > 常见构建输出路径。
+    log_file 提供时 stdout/stderr 写入文件，避免 PIPE 缓冲填满阻塞 agent 线程。
     """
     repo = pathlib.Path(__file__).resolve().parents[2]
     candidates: list[str] = []
@@ -172,10 +174,10 @@ def spawn_agent(profile_path: str, port: int = 50051,
             "未找到 controller_agent（.exe），请先构建 C++ 侧，或设置 RTP_AGENT_BIN="
             + " | ".join(candidates)
         )
+    log_stream = open(log_file, "wb") if log_file else subprocess.PIPE
     return subprocess.Popen(
         [exe_path, "--profile", profile_path, "--port", str(port)],
-        stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-        encoding="utf-8", errors="replace",
+        stdout=log_stream, stderr=subprocess.STDOUT,
     )
 
 

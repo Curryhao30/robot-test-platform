@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import pathlib
 import sys
+import tempfile
 
 import pytest
 
@@ -34,17 +35,18 @@ def profile() -> RobotProfile:
 def client(profile) -> ControllerClient:
     """启动 C++ Agent 子进程并等待 gRPC 就绪；会话结束自动清理。"""
     global _agent_proc
-    proc = spawn_agent(str(profile.source_path), port=PORT)
+    log_fd, log_path = tempfile.mkstemp(prefix="rtp_agent_", suffix=".log")
+    proc = spawn_agent(str(profile.source_path), port=PORT, log_file=log_path)
     _agent_proc = proc
     c = ControllerClient(f"127.0.0.1:{PORT}")
     if not c.wait_ready(timeout_s=20):
         out = ""
-        if proc.stdout:
-            try:
-                out = proc.stdout.read(4000)
-            except Exception:
-                out = ""
-        pytest.fail(f"controller_agent 未就绪，输出: {out}")
+        try:
+            with open(log_path, encoding="utf-8", errors="replace") as f:
+                out = f.read(4000)
+        except Exception:
+            out = ""
+        pytest.fail(f"controller_agent 未就绪，日志 {log_path}: {out}")
     yield c
     c.close()
     if proc.poll() is None:
