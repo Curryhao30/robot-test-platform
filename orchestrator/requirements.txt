@@ -7,4 +7,6 @@ PyYAML>=6.0
 numpy>=1.26
 fastapi>=0.110
 uvicorn>=0.27
+# starlette.testclient 新版要求 httpx2（CI 装最新 starlette 时必需；旧版使用 httpx）
+httpx2
 playwright>=1.45
