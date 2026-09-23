@@ -122,6 +122,14 @@ OperationEnabled，含 QuickStop/Fault 分支）+ 显式迁移表：
 位语义：statusword bit0=ready / bit1=switched on / bit2=operation enabled /
 bit3=fault / bit6=switch on disabled。非法迁移拒绝并保留原状态。
 
+### 4.3 安全联锁仿真（simulator/，P2.2a）
+- `SafetyStateMachine`：输入 ESTOP/门/抱闸/驱动器故障 → 输出 允许使能/停机/抱闸；
+  优先级 ESTOP > 门 > 驱动器故障；抱闸未释放 → 禁止使能（防坠落）；
+- `SafetyService`：GetSafetyState / SetSafetyInput（仿真注入）；`stop_required`
+  上升沿联动控制器（ESTOP → 急停 FAULT，门开 → Guard Stop）；复位可恢复；
+- 边界：只验证安全逻辑与联锁语义，安全等级与真实 I/O 由 P2.2b HIL 验证。
+- 修复 P0 bug：reset 清 emergency_requested_/stop_requested_/pending_abort_。
+
 ### 4.3 EtherCAT 主站抽象（simulator/，P1-2/3/5 + P2.1a）
 - `EthercatMaster`（ethercat_master.hpp）：exchange / run_cycles / 故障注入 /
   mode 虚接口——gRPC EthercatService 与用例只依赖本抽象；
@@ -196,8 +204,8 @@ huayan_elfin_pro_public 可基于公开规格建立）。
 --profile ... --port <候选端口>`，等待 gRPC 就绪；示教器测试额外拉起 uvicorn 子进程
 （端口 58081-58083）+ Playwright；会话结束自动生成报告。
 
-用例矩阵见 README.md「测试矩阵」。当前共 **57 项**：
-P0 10 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 骨架 3。
+用例矩阵见 README.md「测试矩阵」。当前共 **65 项**：
+P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 骨架 3 + 安全联锁 7。
 
 关键测试设计点：
 - **实时性断言**（P1-3）：500Hz（周期 2000us）与 1000Hz 下 overrun==0 且
@@ -252,6 +260,7 @@ P0 10 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapt
 | v0.8.0-p2-plan | P2 规划基线 | 2026-09-22 |
 | v0.9.0-p2.0 | Robot Adapter 抽象（simulation/hil 切换） | 2026-09-23 |
 | v0.10.0-p2.1a | EthercatMaster 抽象 + SOEM 骨架（--bus 切换） | 2026-09-23 |
+| v0.11.0-p2.2a | SafetyService 安全联锁仿真（ESTOP>门>驱动器故障 + 控制器联动） | 2026-09-23 |
 
 ## 10. 后续演进（P2 / 管理侧）
 

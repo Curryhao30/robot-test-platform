@@ -15,6 +15,7 @@
 #include "robottest/virtual_drive.hpp"
 #include "robottest/virtual_ethercat.hpp"
 #include "robottest/soem_ethercat_bus.hpp"
+#include "robottest/safety_state_machine.hpp"
 
 namespace {
 
@@ -389,6 +390,64 @@ private:
     robottest::EthercatMaster& bus_;
 };
 
+// P2.2a：安全联锁仿真服务。SetSafetyInput 求值联锁矩阵，并在
+// stop_required 上升沿联动控制器停止（ESTOP -> 急停 FAULT；门开 -> 正常停）。
+// 幂等：输入不变（无上升沿）不重复联动。
+class SafetyServiceImpl final : public robottest::SafetyService::Service {
+public:
+    SafetyServiceImpl(robottest::SafetyStateMachine& safety,
+                      robottest::ControllerAgent& agent)
+        : safety_(safety), agent_(agent) {}
+
+    grpc::Status SetSafetyInput(grpc::ServerContext*,
+                                const robottest::SetSafetyInputRequest* req,
+                                robottest::SetSafetyInputResponse* out) override {
+        robottest::SafetyInputs in;
+        in.estop = req->inputs().estop();
+        in.door_open = req->inputs().door_open();
+        in.brake_released = req->inputs().brake_released();
+        in.drive_fault = req->inputs().drive_fault();
+        safety_.set_inputs(in);
+        safety_.evaluate(in);
+        const auto& o = safety_.outputs();
+        if (o.stop_required && !prev_stop_required_) {
+            if (o.state == "ESTOP") agent_.stop(true);
+            else if (o.state == "GUARDED") agent_.stop(false);
+        }
+        prev_stop_required_ = o.stop_required;
+        fill_safety(out->mutable_outputs(), o);
+        out->set_ok(true);
+        return grpc::Status::OK;
+    }
+
+    grpc::Status GetSafetyState(grpc::ServerContext*,
+                                const robottest::GetSafetyStateRequest*,
+                                robottest::GetSafetyStateResponse* out) override {
+        const auto& i = safety_.inputs();
+        auto* im = out->mutable_inputs();
+        im->set_estop(i.estop);
+        im->set_door_open(i.door_open);
+        im->set_brake_released(i.brake_released);
+        im->set_drive_fault(i.drive_fault);
+        fill_safety(out->mutable_outputs(), safety_.outputs());
+        return grpc::Status::OK;
+    }
+
+private:
+    static void fill_safety(robottest::SafetyOutputsMsg* m,
+                            const robottest::SafetyOutputs& o) {
+        m->set_allow_enable(o.allow_enable);
+        m->set_stop_required(o.stop_required);
+        m->set_brake_request(o.brake_request);
+        m->set_state(o.state);
+        m->set_error_code(o.error_code);
+    }
+
+    robottest::SafetyStateMachine& safety_;
+    robottest::ControllerAgent& agent_;
+    bool prev_stop_required_ = false;
+};
+
 // ---------------------------------------------------------------------------
 // Profile 加载（与 orchestrator 读取同一份 YAML）
 // ---------------------------------------------------------------------------
@@ -489,9 +548,12 @@ int main(int argc, char** argv) {
     ControllerServiceImpl service(agent);
     Cia402ServiceImpl cia402_service(drives);
     EthercatServiceImpl ethercat_service(*bus);
+    robottest::SafetyStateMachine safety_machine;
+    SafetyServiceImpl safety_service(safety_machine, agent);
     builder.RegisterService(&service);
     builder.RegisterService(&cia402_service);
     builder.RegisterService(&ethercat_service);
+    builder.RegisterService(&safety_service);
     // 同步服务模型：gRPC 为每个 RPC 分配独立线程池线程，
     // 长耗时 MoveAbsolute 不阻塞并发 Stop/GetState，无需显式 completion queue。
     // （此前 AddCompletionQueue 在本机 clang+mingw64 工具链上触发崩溃，已移除）
@@ -505,6 +567,7 @@ int main(int argc, char** argv) {
     std::cout << "Cycle         : " << cycle_hz << " Hz" << std::endl;
     std::cout << "Dof           : " << limits.size() << std::endl;
     std::cout << "Cia402Slaves  : " << drives.size() << std::endl;
+    std::cout << "Safety        : Interlock Sim (P2.2a)" << std::endl;
     std::cout << "EthercatBus   : Virtual PDO @" << cycle_hz << " Hz"
               << std::endl;
     std::cout << "Listening     : " << addr << std::endl;

@@ -6,6 +6,7 @@ add_library(robot_sim STATIC
   src/virtual_drive.cpp
   src/virtual_ethercat.cpp
   src/soem_ethercat_bus.cpp
+  src/safety_state_machine.cpp
 )
 target_include_directories(robot_sim PUBLIC include)
 target_compile_features(robot_sim PUBLIC cxx_std_17)

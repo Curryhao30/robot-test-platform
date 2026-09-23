@@ -194,6 +194,20 @@ def test_move_without_enable(client):
 # ---------------------------------------------------------------------------
 # 9. 急停与复位（Emergency Stop -> FAULT -> Reset）
 # ---------------------------------------------------------------------------
+def test_emergency_reset_allows_relaunch(client):
+    """P0 回归：急停 -> Reset 后必须能重新运动（emergency_requested_ 复位）。
+    P2.2a 安全联动暴露：旧实现 reset 不清急停标志，复位后首次运动被立即打断。"""
+    client.enable()
+    client.stop(emergency=True)
+    assert client.reset().ok
+    st = client.get_state()
+    assert st.enabled and st.motion_state == "IDLE", st
+    r = client.move_absolute([60.0] + DEG_7[1:], velocity=60.0)
+    assert r.ok and r.motion_state == "DONE", r.error_message
+    st = client.get_state()
+    assert abs(st.joints[0].position - 60.0) < 0.01, st.joints[0].position
+
+
 def test_emergency_stop_and_reset(client):
     client.enable()
     r0 = client.move_absolute([-60.0] + DEG_7[1:], velocity=60.0)

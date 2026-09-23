@@ -278,3 +278,45 @@ message ClearBusFaultResponse {
   bool ok = 1;
   string error = 2;
 }
+
+// ---------------------------------------------------------------------------
+// P2.2a：安全联锁仿真（SafetyStateMachine + 联锁矩阵）
+// 语义：仿真层验证安全逻辑与状态联锁（ESTOP > 门 > 驱动器故障）；
+//       真实安全 I/O（FSoE/硬接线）在 P2.2b HIL 阶段验证，不越界声称。
+// ---------------------------------------------------------------------------
+message SafetyInputsMsg {
+  bool estop = 1;          // 急停按下（true=触发）
+  bool door_open = 2;      // 安全门打开
+  bool brake_released = 3; // 抱闸释放到位（false=未释放）
+  bool drive_fault = 4;    // 任一驱动器故障
+}
+
+message SafetyOutputsMsg {
+  bool allow_enable = 1;   // 允许使能
+  bool stop_required = 2;  // 需要停机（联动 controller 停止）
+  bool brake_request = 3;  // 请求抱闸
+  string state = 4;        // SAFE / ESTOP / GUARDED / FAULT
+  int32 error_code = 5;    // 0=OK 1=ESTOP 2=GUARD 3=DRIVE_FAULT
+}
+
+message SetSafetyInputRequest {
+  SafetyInputsMsg inputs = 1;
+}
+
+message SetSafetyInputResponse {
+  bool ok = 1;
+  SafetyOutputsMsg outputs = 2;
+}
+
+message GetSafetyStateRequest {}
+
+message GetSafetyStateResponse {
+  SafetyInputsMsg inputs = 1;
+  SafetyOutputsMsg outputs = 2;
+}
+
+service SafetyService {
+  // 注入安全输入（仿真），返回联锁输出；stop_required 上升沿联动控制器停止
+  rpc SetSafetyInput(SetSafetyInputRequest) returns (SetSafetyInputResponse);
+  rpc GetSafetyState(GetSafetyStateRequest) returns (GetSafetyStateResponse);
+}

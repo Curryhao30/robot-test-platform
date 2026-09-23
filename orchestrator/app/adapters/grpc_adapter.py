@@ -102,6 +102,17 @@ class GrpcAdapter(RobotAdapter):
     def clear_bus_fault(self, timeout: float = 15.0):
         return self._client.clear_bus_fault(timeout=timeout)
 
+    # -- 安全联锁（P2.2a）---------------------------------------------------
+    def set_safety_input(self, *, estop: bool = False, door_open: bool = False,
+                         brake_released: bool = True, drive_fault: bool = False,
+                         timeout: float = 15.0):
+        return self._client.set_safety_input(estop=estop, door_open=door_open,
+                                             brake_released=brake_released,
+                                             drive_fault=drive_fault, timeout=timeout)
+
+    def get_safety_state(self, timeout: float = 15.0):
+        return self._client.get_safety_state(timeout=timeout)
+
     # -- 生命周期 -----------------------------------------------------------
     def wait_ready(self, timeout_s: float = 15.0) -> bool:
         return self._client.wait_ready(timeout_s=timeout_s)

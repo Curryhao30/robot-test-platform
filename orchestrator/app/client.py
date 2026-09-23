@@ -82,6 +82,7 @@ class ControllerClient:
         self.stub = pb_grpc.ControllerServiceStub(self._channel)
         self.cia402 = pb_grpc.Cia402ServiceStub(self._channel)
         self.ethercat = pb_grpc.EthercatServiceStub(self._channel)
+        self.safety = pb_grpc.SafetyServiceStub(self._channel)
 
     # -- PLCopen 指令 ------------------------------------------------------
     def enable(self, timeout: float = 15.0):
@@ -198,6 +199,22 @@ class ControllerClient:
     def clear_bus_fault(self, timeout: float = 15.0):
         return self.ethercat.ClearBusFault(pb.ClearBusFaultRequest(),
                                            timeout=timeout)
+
+    # -- 安全联锁（P2.2a）----------------------------------------------------
+    def set_safety_input(self, *, estop: bool = False, door_open: bool = False,
+                         brake_released: bool = True, drive_fault: bool = False,
+                         timeout: float = 15.0):
+        """注入安全输入（仿真），返回联锁输出；stop_required 上升沿联动控制器。
+        默认 brake_released=True（未指定时视为抱闸已释放，处于安全空闲态）。"""
+        return self.safety.SetSafetyInput(
+            pb.SetSafetyInputRequest(inputs=pb.SafetyInputsMsg(
+                estop=estop, door_open=door_open,
+                brake_released=brake_released, drive_fault=drive_fault)),
+            timeout=timeout)
+
+    def get_safety_state(self, timeout: float = 15.0):
+        return self.safety.GetSafetyState(pb.GetSafetyStateRequest(),
+                                          timeout=timeout)
 
     # -- 工具 --------------------------------------------------------------
     def wait_ready(self, timeout_s: float = 15.0) -> bool:

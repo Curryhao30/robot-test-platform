@@ -173,6 +173,16 @@ SOEM 骨架：参数校验 + Linux raw socket 网卡探测 + Windows 明确不�
 未连接时 exchange 返回清晰错误，不挂死、不冒充真机已连接。
 用例：网卡缺失 FATAL 退出含原因 / 失败日志含可操作提示 / 非法 --bus 拒绝。
 
+### P2.2a 安全联锁仿真（7 项）—— `tests/test_safety.py`
+
+`SafetyStateMachine`（simulator/）：安全输入（急停/安全门/抱闸/驱动器故障）→
+联锁输出（允许使能/停机/抱闸请求），优先级 **ESTOP > 门 > 驱动器故障**；
+`SafetyService` 三 RPC（GetSafetyState / SetSafetyInput 仿真注入）；
+`stop_required` 上升沿联动控制器：ESTOP → 急停（FAULT+掉使能，复位后可恢复），
+门开 → Guard Stop（正常停止语义）。
+修复 P0 隐藏 bug：`reset()` 未清 `emergency_requested_`，复位后首次运动被急停打断
+（安全联动暴露，新增回归用例 test_emergency_reset_allows_relaunch）。
+
 ### P1-6 波形可视化（2 项）—— `tests/test_waveform.py`
 
 `RunCycles` 逐周期数据 → 零依赖 SVG 波形（`reports/waveforms/jitter_*.svg` /
@@ -203,6 +213,7 @@ SOEM 骨架：参数校验 + Linux raw socket 网卡探测 + Windows 明确不�
 | v0.8.0-p2-plan | P2 规划基线（Adapter/HIL/FSoE/示教器） | ✅ |
 | v0.9.0-p2.0 | **Robot Adapter 抽象**：simulation/hil 配置切换，用例零改动 | ✅ |
 | v0.10.0-p2.1a | **EthercatMaster 抽象 + SOEM 骨架**：--bus 切换，无网卡/非 Linux 清晰 FATAL | ✅ |
+| v0.11.0-p2.2a | **SafetyService 安全联锁仿真**：ESTOP>门>驱动器故障联锁 + 控制器联动 | ✅ |
 
 ## 后续阶段（未实现）
 

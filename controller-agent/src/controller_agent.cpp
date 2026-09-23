@@ -125,6 +125,11 @@ CommandOutcome ControllerAgent::reset() {
         error_code_ = kErrOk;
         error_message_.clear();
         motion_state_ = kMotionIdle;
+        // 急停/停止请求在复位时一并清除：否则残留 emergency_requested_
+        // 会让复位后的下一次运动立即被急停打断（P2.2a 安全联动暴露的 bug）。
+        emergency_requested_ = false;
+        stop_requested_ = false;
+        pending_abort_ = false;
     }
     r.ok = true;
     r.motion_state = kMotionIdle;

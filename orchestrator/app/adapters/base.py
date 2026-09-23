@@ -89,6 +89,15 @@ class RobotAdapter(ABC):
     @abstractmethod
     def clear_bus_fault(self, timeout: float = 15.0): ...
 
+    # -- 安全联锁（P2.2a）---------------------------------------------------
+    @abstractmethod
+    def set_safety_input(self, *, estop: bool = False, door_open: bool = False,
+                         brake_released: bool = True, drive_fault: bool = False,
+                         timeout: float = 15.0): ...
+
+    @abstractmethod
+    def get_safety_state(self, timeout: float = 15.0): ...
+
     # -- 生命周期 -----------------------------------------------------------
     @abstractmethod
     def wait_ready(self, timeout_s: float = 15.0) -> bool: ...
