@@ -5,7 +5,7 @@
 面向多轴协作机器人控制器软件测试开发岗位的项目：以「控制器指令 → 仿真执行 → 状态采样 →
 轨迹判定 → 协议校验 → 自动报告 → 缺陷回归」为闭环的软硬件解耦自动化验证平台。
 当前实现覆盖 **P0 运动控制核心链路 + P1 现场总线/实时性/示教器/异常注入 +
-P2 抽象/安全联锁/示教器协议模拟器**，共 **91 项自动化用例**，
+P2 抽象/安全联锁/示教器协议模拟器**，共 **94 项自动化用例**，
 本地与 GitHub Actions 双端全绿。
 
 ```
@@ -51,8 +51,8 @@ robot-test-platform/
 │   ├── app/                      #   profile.py client.py report.py waveform.py
 │   ├── oracle/                   #   position.py velocity.py trajectory.py timing.py state_machine.py
 │   ├── teach_pendant/            #   FastAPI 示教器后端 + static/index.html（五块 UI）
-│   ├── frontend/index.html        #   管理控制台（P3-charts：可触发运行/查看明细/闭环缺陷/轨迹与波形曲线）
-│   └── tests/                    #   91 项用例（P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 3 + 安全 7 + TP 9 + Console 12 + Qt 面板 5）
+│   ├── frontend/index.html        #   管理控制台（P3-charts：可触发运行/查看明细/闭环缺陷/轨迹与波形曲线；P3-realtime：运行中实时曲线 SSE）
+│   └── tests/                    #   94 项用例（P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 3 + 安全 7 + TP 9 + Console 15 + Qt 面板 5）
 ├── robot_profiles/maira_sim.yaml # 机型配置（7 轴仿真 Profile，cycle=1000Hz）
 ├── scripts/                      # generate_stubs.py / run_tests.ps1 / run_tests.sh
 ├── docs/design.md                # 软件设计文档（P0+P1）
@@ -98,7 +98,7 @@ cd orchestrator; ..\.venv\Scripts\python -m pytest -v
 agent 进程由 conftest 自动拉起（候选端口 50051/50551/51051/51551/52051/52551 自动重试，
 `RTP_AGENT_BIN` 可覆盖路径）。
 
-## 测试矩阵（91 项）
+## 测试矩阵（94 项）
 
 ### P0 运动控制核心（11 项）—— `tests/test_p0_core.py`
 

@@ -213,8 +213,8 @@ huayan_elfin_pro_public 可基于公开规格建立）。
 --profile ... --port <候选端口>`，等待 gRPC 就绪；示教器测试额外拉起 uvicorn 子进程
 （端口 58081-58083）+ Playwright；会话结束自动生成报告。
 
-用例矩阵见 README.md「测试矩阵」。当前共 **91 项**：
-P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 骨架 3 + 安全联锁 7 + TP 协议 9 + Console 12 + Qt 面板 5。
+用例矩阵见 README.md「测试矩阵」。当前共 **94 项**：
+P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 骨架 3 + 安全联锁 7 + TP 协议 9 + Console 15 + Qt 面板 5。
 
 关键测试设计点：
 - **实时性断言**（P1-3）：500Hz（周期 2000us）与 1000Hz 下 overrun==0 且
@@ -247,7 +247,7 @@ P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapt
 
 ## 8. 验收标准
 
-1. `pytest` 全绿：91 项用例通过（本机 + CI 双端）；
+1. `pytest` 全绿：94 项用例通过（本机 + CI 双端）；
 2. 报告目录生成 result.json / trajectory.csv / report.html / log.txt /
    waveforms/*.svg；
 3. 关键论断可验证：Python 侧无控制周期循环；轨迹与逐周期数据来自 C++ Agent；
@@ -275,6 +275,7 @@ P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapt
 | v0.14.0-p3-ops | 可操作控制台（触发运行/分组、进度轮询、运行明细、缺陷人工关闭·重开） | 2026-09-23 |
 | v0.15.0-p3-charts | 运行数据曲线（7 轴轨迹位置/速度/加速度 + 逐周期 jitter/latency 波形 + 全局波形面板） | 2026-09-23 |
 | v0.14.2-teach-pendant-qt-tests | 示教器 Qt 面板测试补全（MockBackend 抽离独立模块 + 5 项契约测试） | 2026-09-23 |
+| v0.16.0-p3-realtime | 运行中实时曲线：conftest 逐用例轨迹段自动捕获 → active.live.jsonl → console SSE 流式推送 → 前端 EventSource 边跑边刷新（新增 3 项 SSE 测试） | 2026-09-23 |
 
 ## 10. 后续演进（P2 / 管理侧）
 
@@ -292,5 +293,11 @@ P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapt
   人工闭环（defect_state.json 覆盖自动派生）在前序版本落地，数据源全部为
   reports/run_*/result.json，不引入数据库；Requirement→Build→Release
   写操作（版本发布/分配）为后续演进；
+- 实时曲线：v0.16.0-p3-realtime 把"运行后可回看"升级为"运行中边跑边刷新"——
+  adapter 包装自动捕获逐用例轨迹段（对用例零侵入，抽稀≤200 点），每用例结束
+  flush 到 reports/active.live.jsonl，console 新增 `/api/runs/active/stream` SSE
+  端点增量推送，前端 EventSource 动态滚动绘制 7 轴曲线；运行结束归档到
+  run_dir/active.jsonl（历史可回看）并删除 live 文件作为 SSE 结束信号；
+  数据 100% 来自 C++ Agent 批量采样，不引入模拟数据；
 - AI 缺陷分诊：明确不做（对控制器测试岗位，"CiA402 FaultReset 异常状态覆盖"
   比"用大模型分析 BUG"更有价值）。
