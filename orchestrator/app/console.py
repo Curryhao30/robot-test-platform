@@ -67,6 +67,22 @@ class _FinishedProc:
         return self._rc
 
 
+def _subprocess_env() -> dict:
+    """子进程环境：RTP_WRITE_REPORT=1 + Windows 下补齐 agent 运行时 DLL 路径。
+
+    controller_agent.exe 依赖 msys64 的 gRPC/absl DLL；uvicorn 若由桌面
+    启动（PATH 无 msys64），子进程 pytest 自动拉起 agent 会失败。
+    RTP_MSYS_ROOT 可覆盖默认路径。
+    """
+    env = dict(os.environ)
+    env["RTP_WRITE_REPORT"] = "1"
+    msys = os.environ.get("RTP_MSYS_ROOT", r"C:\Users\jh\msys64")
+    if sys.platform == "win32" and os.path.isdir(msys):
+        extra = [msys + r"\mingw64\bin", msys + r"\clang64\bin", msys + r"\usr\bin"]
+        env["PATH"] = os.pathsep.join(extra + [env.get("PATH", "")])
+    return env
+
+
 def _start_test_run(group: str | None = None) -> dict:
     """启动后台 pytest 子进程（全量或单分组文件）。
 
@@ -81,12 +97,10 @@ def _start_test_run(group: str | None = None) -> dict:
         if f is None:
             raise ValueError(f"未知分组: {group}")
         cmd.append("tests/" + f)
-    env = dict(os.environ)
-    env["RTP_WRITE_REPORT"] = "1"
     log = REPORTS / "manual_run.log"
     log.parent.mkdir(parents=True, exist_ok=True)
     with log.open("wb") as lf:
-        proc = subprocess.Popen(cmd, cwd=str(ORCHESTRATOR), env=env,
+        proc = subprocess.Popen(cmd, cwd=str(ORCHESTRATOR), env=_subprocess_env(),
                                 stdout=lf, stderr=subprocess.STDOUT)
     _ACTIVE_RUN = {
         "proc": proc,
