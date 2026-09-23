@@ -54,6 +54,7 @@
 |----|------|------|
 | 人机交互 | Virtual Teach Pendant | 五块 UI，操作经 REST 桥接真实控制器状态 |
 | 编排层 | Python Orchestrator | 加载 Profile、下发命令、接收批量数据、Oracle 判定、报告/波形 |
+| 接入层 | Robot Adapter（P2.0） | simulation（本地 Agent）/ hil（真机盒子），用例层唯一依赖 |
 | 执行层 | C++ Controller Agent | 控制环、PLCopen 状态机、CiA402 状态机、EtherCAT 周期交换、高频采样 |
 | 被控对象 | Robot Simulator / VirtualDrive / VirtualEthercatBus | 运动模型与总线行为 |
 | 判定层 | Test Oracle | 独立判定"行为是否正确" |
@@ -188,8 +189,8 @@ huayan_elfin_pro_public 可基于公开规格建立）。
 --profile ... --port <候选端口>`，等待 gRPC 就绪；示教器测试额外拉起 uvicorn 子进程
 （端口 58081-58083）+ Playwright；会话结束自动生成报告。
 
-用例矩阵见 README.md「测试矩阵」。当前共 **48 项**：
-P0 10 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2。
+用例矩阵见 README.md「测试矩阵」。当前共 **54 项**：
+P0 10 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6。
 
 关键测试设计点：
 - **实时性断言**（P1-3）：500Hz（周期 2000us）与 1000Hz 下 overrun==0 且
@@ -228,6 +229,7 @@ P0 10 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2。
 3. 关键论断可验证：Python 侧无控制周期循环；轨迹与逐周期数据来自 C++ Agent；
 4. 换一个 Profile（新 YAML）不改测试代码即可运行；
 5. 总线故障注入语义可验证（丢失隔离 / 断链阻断 / 恢复）。
+6. Robot Adapter：用例层不出现 ControllerClient 直连；adapter.type 一行切换（P2.0）。
 
 ## 9. 版本记录
 
@@ -240,6 +242,8 @@ P0 10 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2。
 | v0.5.0-p1 | 虚拟示教器 + Playwright | 2026-09-22 |
 | v0.6.0-p1 | 总线异常注入 | 2026-09-22 |
 | v0.7.0-p1 | 逐周期波形可视化 | 2026-09-22 |
+| v0.8.0-p2-plan | P2 规划基线 | 2026-09-22 |
+| v0.9.0-p2.0 | Robot Adapter 抽象（simulation/hil 切换） | 2026-09-23 |
 
 ## 10. 后续演进（P2 / 管理侧）
 

@@ -153,6 +153,16 @@ Playwright 端到端 8 用例：五块布局、tab 切换、**Servo ON 真实使
 
 含注入-清除循环、非法参数拒绝、用例间从站状态隔离（autouse teardown 复位）。
 
+### P2.0 Robot Adapter 抽象（6 项）—— `tests/test_adapter.py`
+
+`app/adapters/`（base.py / grpc_adapter.py / `__init__.py`）：用例层唯一依赖
+`RobotAdapter`，`ControllerClient` 只存在于 conftest 与 grpc_adapter 内部。
+- `adapter_config(profile)`：解析 `profile.adapter.type`（simulation | hil），
+  非法类型 / HIL 缺 endpoint 直接报错；
+- `connect_hil(profile)`：HIL 端点不可达时抛清晰错误（不挂死、不静默回退）；
+- conftest 按 adapter 类型选择：simulation 拉起 C++ Agent 并包装为
+  GrpcAdapter；hil 直连真机盒子——**48 项 P0/P1 用例零改动切换**。
+
 ### P1-6 波形可视化（2 项）—— `tests/test_waveform.py`
 
 `RunCycles` 逐周期数据 → 零依赖 SVG 波形（`reports/waveforms/jitter_*.svg` /
@@ -180,6 +190,8 @@ Playwright 端到端 8 用例：五块布局、tab 切换、**Servo ON 真实使
 | v0.5.0-p1 | 虚拟示教器（五块 UI）+ Playwright 自动化 | ✅ |
 | v0.6.0-p1 | 总线异常注入（LINK_LOSS/SLAVE_LOSS/BUS_ERROR + 恢复） | ✅ |
 | v0.7.0-p1 | 逐周期波形可视化（SVG） | ✅ |
+| v0.8.0-p2-plan | P2 规划基线（Adapter/HIL/FSoE/示教器） | ✅ |
+| v0.9.0-p2.0 | **Robot Adapter 抽象**：simulation/hil 配置切换，用例零改动 | ✅ |
 
 ## 后续阶段（未实现）
 

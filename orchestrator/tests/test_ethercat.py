@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import pytest
 
-from app.client import ControllerClient
 from tests import capture
 from tests.test_cia402 import (_enable, _reset_slave, CW_ENABLE_OPERATION,
                                CW_SHUTDOWN, CW_SWITCH_ON, N_SLAVES,

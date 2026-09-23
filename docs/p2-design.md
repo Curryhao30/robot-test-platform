@@ -1,7 +1,7 @@
 # P2 规划：真实 EtherCAT HIL / FSoE 安全联锁 / 真示教器
 
 > 文档编号：RTP-DESIGN-P2-001 ｜ 版本：v0.8（规划基线）｜ 状态：**规划中，未实现**
-> 前置：P0（v0.1.0-p0）+ P1（v0.2.0-p1 ~ v0.7.0-p1）已完成，48 用例双端全绿。
+> 前置：P0（v0.1.0-p0）+ P1（v0.2.0-p1 ~ v0.7.0-p1）+ **P2.0（v0.9.0-p2.0，已完成）**，54 用例双端全绿。
 > 本文档回答三个问题：**怎么接真机不破坏现有测试？安全联锁怎么从仿真走到 HIL？
 > 真示教器怎么进？**——以及各自的验收标准与风险。
 
@@ -47,7 +47,7 @@ P2 的目标是**把 P0/P1 的"软硬件解耦"论断兑现到真实硬件**：�
 RunCycles / InjectBusFault 在真机上语义等价（真机上有实际 watchdog / WKC / 周期抖动），
 P2 只是给这个抽象换一个实现。
 
-## 3. P2.0 Robot Adapter 抽象层（接口预留，纯软件）
+## 3. P2.0 Robot Adapter 抽象层（接口预留，纯软件）—— ✅ 已完成（v0.9.0-p2.0）
 
 ### 3.1 为什么先做它
 现在测试通过 `ControllerClient` 直连 C++ Agent（唯一入口，已天然可替换）。
@@ -74,8 +74,8 @@ orchestrator/app/
 - 测试入口（conftest）改为：读 Profile → `get_adapter(profile)` → 用例层只依赖
   `RobotAdapter` 协议。**48 个用例的 import 从 `client` 改为 `adapters`，行为不变**。
 
-### 3.3 验收
-1. 全量 48 用例经 adapter 层仍全绿（CI）；
+### 3.3 验收（✅ 已达成）
+1. 全量 54 用例经 adapter 层仍全绿（CI）；
 2. `adapter.type: hil` + 无硬件时，报清晰错误（"HIL 未配置/未连接"），不挂死；
 3. 用例文件不出现 `ControllerClient` 直连（仅 adapter 内允许）。
 

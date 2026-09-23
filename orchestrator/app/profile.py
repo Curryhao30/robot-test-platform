@@ -46,6 +46,9 @@ class RobotProfile:
     velocity_overshoot_tolerance: float
     stop_behavior: str
     source_path: str
+    # P2.0 Robot Adapter：simulation（本地拉起 Agent）| hil（连接真机盒子）
+    adapter_type: str = "simulation"
+    adapter_endpoint: str | None = None
 
     @classmethod
     def load(cls, name: str = "maira_sim") -> "RobotProfile":
@@ -60,6 +63,7 @@ class RobotProfile:
         joints = tuple(JointLimits.from_dict(j) for j in raw["joints"])
         ctrl = raw.get("controller", {})
         acc = raw.get("accuracy", {})
+        adapter = raw.get("adapter", {}) or {}
         return cls(
             name=raw["name"],
             manufacturer=raw.get("manufacturer", ""),
@@ -73,6 +77,8 @@ class RobotProfile:
             ),
             stop_behavior=str(ctrl.get("stop_behavior", "immediate_stop")),
             source_path=str(path),
+            adapter_type=str(adapter.get("type", "simulation")),
+            adapter_endpoint=adapter.get("endpoint") or None,
         )
 
     @property

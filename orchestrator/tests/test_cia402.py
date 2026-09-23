@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.client import ControllerClient
+from app.adapters import RobotAdapter
 from tests import capture
 
 # CiA402 标准状态字（含 bit9 Remote=1）
@@ -43,7 +43,7 @@ OBJ_PROFILE_VEL = 0x6081
 N_SLAVES = 7
 
 
-def _reset_slave(client: ControllerClient, slave: int):
+def _reset_slave(client: RobotAdapter, slave: int):
     """复位到 SwitchOnDisabled：Fault 走 FaultReset 沿，其余走 DisableVoltage。"""
     client.set_controlword(slave, 0x00)          # 先清 bit7（保证 FaultReset 上升沿）
     st = client.get_statusword(slave)
@@ -56,7 +56,7 @@ def _reset_slave(client: ControllerClient, slave: int):
     return st
 
 
-def _enable(client: ControllerClient, slave: int):
+def _enable(client: RobotAdapter, slave: int):
     """标准上电序列：Shutdown -> SwitchOn -> EnableOperation。"""
     _reset_slave(client, slave)
     client.set_controlword(slave, CW_SHUTDOWN)

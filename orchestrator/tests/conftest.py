@@ -17,6 +17,7 @@ REPO = pathlib.Path(__file__).resolve().parents[2]
 ORCH = REPO / "orchestrator"
 sys.path.insert(0, str(ORCH))
 
+from app.adapters import adapter_config, connect_hil, make_grpc_adapter  # noqa: E402
 from app.client import ControllerClient, spawn_agent  # noqa: E402
 from app.profile import RobotProfile  # noqa: E402
 from app.report import RunContext, next_run_dir, write_run  # noqa: E402
@@ -108,10 +109,20 @@ def _try_spawn(profile_path: pathlib.Path, log_path: str, attempt: int):
 
 
 @pytest.fixture(scope="session")
-def client(profile) -> ControllerClient:
-    """启动 C++ Agent 子进程并等待 gRPC 就绪；绑定失败/未就绪自动换端口重试；
-    会话结束自动清理。"""
+def client(profile) -> "RobotAdapter":
+    """启动被测对象（Simulation: 拉起 C++ Agent；HIL: 连接真机盒子）并返回
+    RobotAdapter。用例层只见 adapter，不见 ControllerClient（P2.0）。"""
     global _agent_proc
+    cfg = adapter_config(profile)
+    if cfg["type"] == "hil":
+        try:
+            adp = connect_hil(profile)
+        except RuntimeError as e:
+            pytest.fail(f"HIL 连接失败: {e}")
+        yield adp
+        adp.close()
+        return
+
     (REPO / "reports").mkdir(parents=True, exist_ok=True)
     log_path = str(REPO / "reports" / "agent.log")
     last_err = ""
@@ -119,7 +130,7 @@ def client(profile) -> ControllerClient:
         proc, c, err = _try_spawn(profile.source_path, log_path, attempt)
         if proc is not None:
             _agent_proc = proc
-            yield c
+            yield make_grpc_adapter(c, profile)
             c.close()
             if proc.poll() is None:
                 proc.terminate()

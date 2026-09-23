@@ -44,3 +44,12 @@ drive:
 teach_pendant:
   resolution: "1280x800"
   size_inch: 10.5
+
+# P2.0 Robot Adapter：simulation（本地拉起 Agent 驱动仿真）| hil（连接真机盒子）
+# HIL 模式需配置 endpoint 与 EtherCAT 从站参数，例如：
+#   adapter:
+#     type: hil
+#     endpoint: "192.168.1.10:50051"
+#     ethercat: { master_iface: "eth0", slaves: 7 }
+adapter:
+  type: simulation
