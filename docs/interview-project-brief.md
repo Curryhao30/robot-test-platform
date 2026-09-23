@@ -108,11 +108,21 @@ Robot Controller & Teach Pendant Validation Platform
 ### 4.1 C++ Controller Agent（controller-agent/）
 - **干什么**：控制环（可配置 500/1000/2000Hz）、PLCopen 运动状态机（IDLE/BUSY/ACTIVE/DONE/ABORTED/ERROR + DISABLED/ENABLED/FAULT）、运动命令执行（Enable/Disable/Home/MoveAbsolute/MoveRelative/Stop/Reset/GetState）、轨迹采样与缓冲。
 - **怎么测**：P0 10+1 用例——正常执行、运动中 Stop、新命令抢占、越限位、未使能、急停→Reset 恢复、Reset 后重新运动。
+- **实现细节**：类结构 `ControllerAgent / RobotModel / Axis / AxisGroup / MotionExecutor /
+  TrajectoryGenerator / StateMachine / DataRecorder`；gRPC 服务四组（Controller /
+  Cia402 / Ethercat / Safety）；控制环按 `profile.cycle_hz`（500/1000/2000Hz）自旋对齐
+  周期；PLCopen 运动状态 IDLE/BUSY/ACTIVE/DONE/ABORTED/ERROR + 控制器级
+  DISABLED/ENABLED/FAULT；采样线程把 timestamp/关节位置/速度/加速度/状态写入缓冲，
+  指令完成后批量回传（一次 gRPC 响应带全轨迹，见 3.1 实时性边界）。
 - **面试怎么说**："状态机语义对标 PLCopen：Busy/Active/Done、CommandAborted、Error+ErrorID；急停是 FAULT 级，必须 Reset 才能恢复——这是真实控制器语义，不是玩具。"
 
 ### 4.2 Robot Simulator（simulator/）
 - **干什么**：RobotModel（各轴状态+限位/限速）、TrajectoryGenerator（梯形速度剖面、同步 PTP 按最慢轴统一时长）、MotionExecutor（按周期推进规划）。
 - **边界**：P0 用关节空间梯形剖面验证**运动行为与状态机**；FK/IK、TCP 轨迹、MoveLin/MoveCirc 属后续阶段，不混入。
+- **实现细节**：`TrajectoryGenerator` 生成梯形速度剖面（加速-匀速-减速三段，参数
+  velocity/acceleration/deceleration/jerk），同步 PTP 按"最慢轴统一时长"规划——
+  所有轴同时启停，避免关节间异步；`MotionExecutor` 按控制周期推进规划并钳制限位/限速；
+  越限位在模型层触发 Error，为 Joint Limit Oracle 提供真实输入。
 - **面试怎么说**："第一版刻意不做 7 轴 DH 正逆解——控制器测试岗位要验证的是运动执行和状态机，不是证明能推逆运动学。梯形剖面 + 同步 PTP 足够支撑 PLCopen 指令与 Oracle 判定，运动学留到后续。"
 
 ### 4.3 Robot Profile（robot_profiles/maira_sim.yaml）
@@ -126,16 +136,30 @@ Robot Controller & Teach Pendant Validation Platform
 ### 4.5 CiA402 驱动状态机 + 对象字典 + 虚拟从站（P1-1）
 - **干什么**：完整迁移表 `NotReadyToSwitchOn→SwitchOnDisabled→ReadyToSwitchOn→SwitchedOn→OperationEnabled`，Fault→FaultReset 上升沿恢复；对象字典 0x6040/0x6041/0x6060/0x6064/0x607A；7 个独立虚拟从站。
 - **怎么测**：12 用例——状态字位语义（bit0 ready/bit1 switched on/bit2 op enabled/bit3 fault/bit6 switch on disabled）、非法迁移拒绝、FaultReset 上升沿、多从站一致性。
+- **实现细节**：状态迁移表覆盖 `NotReadyToSwitchOn → SwitchOnDisabled → ReadyToSwitchOn →
+  SwitchedOn → OperationEnabled`，含 QuickStop 与 Fault 分支；控制字 0x6040 位语义
+  （bit0 switch on / bit1 enable voltage / bit2 quick stop / bit7 fault reset 上升沿）、
+  状态字 0x6041（bit0 ready / bit1 switched on / bit2 operation enabled / bit3 fault /
+  bit6 switch on disabled）；对象字典 0x6060 模式、0x6064 实际位置、0x607A 目标位置；
+  7 个虚拟从站实例相互独立（用例间 autouse teardown 复位，防污染）。
 - **面试怎么说**："CiA402 是 EtherCAT/CoE 上的驱动器 Profile 标准，不是现场总线。我把状态迁移表和对象字典做成可测试的组件——面试官一问我就能画迁移图，而不是只会念协议名。"
 
 ### 4.6 EtherCAT 主站抽象：Virtual / SOEM 骨架（P1-2/3/5 + P2.1a）
 - **干什么**：`EthercatMaster` 虚接口（exchange/run_cycles/inject_fault/mode），`VirtualEthercatBus`（仿真实现：周期 PDO 交换 + 实时统计 + 故障注入）与 `SoemEthercatBus`（真机骨架：参数校验 + Linux raw socket 网卡探测 + Windows 明确不支持）各自实现；`main.cpp --bus virtual|soem` 一行切换。
+- **实现细节**：`VirtualEthercatBus` 周期 PDO 交换——controlword→statusword、状态名透传、
+  目标位置 0x607A→0x6064 直通；`RunCycles` 记录逐周期 interval_us（周期间隔）与
+  processing_us（单周期交换处理耗时）；故障注入三种语义：LINK_LOSS 整线失败、
+  SLAVE_LOSS 指定从站丢失且其余从站照常交换、BUS_ERROR 帧级错误；
+  `SoemEthercatBus` 为真机骨架：--bus 切换 + Linux raw socket 网卡探测 + Windows 明确不支持。
 - **面试怎么说**："真机接入点钉死在 EthercatMaster 抽象上——P2.1b 只需在 SoemEthercatBus::init() 里替换成 SOEM 的 ecx_init + 从站扫描，上层 gRPC 和 94 个用例零改动；而且骨架现在就保证无网卡/非 Linux 时报清晰错误，不冒充真机已连接。"
 
 ### 4.7 实时性量化（P1-3）
 - **干什么**：RunCycles 返回逐周期 `interval_us[]`（周期间隔）与 `processing_us[]`（单周期交换耗时），统计 min/max/mean/std + overrun。
 - **怎么测**：断言 500Hz（周期 2000us）下 overrun==0 且 latency_max<2000us；1000Hz 同理。
 - **实测（本机 2026-09）**：**500Hz jitter max≈87us、latency max≈3us、overrun=0；1000Hz 7 从站 latency max≈6us、overrun=0**。
+- **实现细节**：C++ 侧自旋等待到名义周期起点再进入下一周期（busy-wait，不 sleep 累计
+  漂移）；overrun 计数记录"实际进入周期晚于名义时刻"的次数；Python 侧拿到逐周期数组后
+  **重算校验统计自洽**（max(interval)−jitter_max≈名义周期），防止 C++ 侧统计与原始数据不一致。
 - **面试怎么说**："'能跑'不是指标，'确定性'才是。jitter/latency/overrun 三个维度量化控制周期质量，波形图把逐周期抖动画出来——面试官看到波形比看到'测试通过'信服得多。"
 
 ### 4.8 总线异常注入（P1-5）
@@ -151,6 +175,9 @@ Robot Controller & Teach Pendant Validation Platform
 ### 4.10 示教器协议模拟器 TP/1.0（P2.3）
 - **干什么**：自研行分隔 JSON 帧协议（非华沿私有协议，明确标注）——`protocol.py` 编解码（坏帧拒绝/粘包半包重组）、`tp_bridge.py` TCP 协议桥（TP 帧 ↔ RobotAdapter）、`tp_simulator.py` 协议客户端（CLI 可独立跑 jog_demo 脚本）。
 - **怎么测**：9 用例——编解码往返/坏帧/粘包半包（单测）+ SERVO/JOG/STOP **经协议线真实改变控制器状态**（与 UI 用例同款断言）+ 未知动词拒绝 + 控制器错误透传 + STATE 推送。
+- **实现细节**：帧协议为行分隔 JSON（`{"verb": "...", "params": {...}}\n`），坏帧直接
+  拒绝并回 NAK；TCP 流按行缓冲做粘包/半包重组（半包等待续传、多帧逐条处理）；动词表
+  SERVO/JOG/STOP/HOME/MOVE/STATE；控制器错误码经协议线原样透传给客户端。
 - **面试怎么说**："示教器在架构里是'客户端'——浏览器 UI 走 REST、协议模拟器走 TP 协议线，**两条线共享同一控制器契约**。将来华沿协议拿到后，RealTPBridge 只需把厂商报文映射到这套契约，UI 和用例零改动。"
 
 ### 4.11 安全联锁仿真（P2.2a）
@@ -202,6 +229,25 @@ Robot Controller & Teach Pendant Validation Platform
   4. 真实模式（有 agent 时）：先 `python -m uvicorn teach_pendant.main:app --port 58081`，再 `python -m teach_pendant.qt_panel --url http://127.0.0.1:58081`，操作会真实改变控制器关节状态（与 Playwright 用例同语义）。
   5. 测试与曲线页（演示用）：另开 `python -m uvicorn app.console:app --port 58090`，桌面面板切到「测试与曲线」标签页即内嵌控制台网页——点运行历史任意一行展开，能看到逐用例 PASS/FAIL 明细与 jitter/latency 两条数据曲线；这一页直接把"网页端看的测试和曲线"搬到了桌面 HMI，简历素材里可强调"QT 面板聚合了测试报告与波形"。
 
+### 4.16 运行中实时曲线（P3-realtime，v0.16.0）
+- **干什么**：把"运行完成后回看曲线"升级为“**运行过程中边跑边刷新的实时曲线**”
+  （示波器/在线监控语义）——SSE 流式推送 + 前端 EventSource 动态绘制。
+- **链路**：`_wrap_adapter` 包装 RobotAdapter，每次运动指令成功后自动捕获一段轨迹
+  （`Trajectory.from_result` 抽稀 ≤200 点，**对用例零侵入**）→ 存入
+  `capture.TRAJECTORY_SEGMENTS` → 每用例结束 conftest flush 到
+  `reports/active.live.jsonl`（追加）→ console 新增 `/api/runs/active/stream` SSE 端点
+  增量推送 → 前端实时轨迹面板（EventSource）按"运行累计时间轴"动态滚动绘制 7 轴曲线。
+- **结束信号**：运行结束 console 清 `_ACTIVE_RUN` 并**删除 live 文件**；SSE 生成器
+  连续无新数据且 is_active() 为 False 即收尾（`event-stream` 正常断开，前端自动关流）；
+  同时 live 内容归档到 `run_dir/active.jsonl`（历史 run 可回看）。
+- **数据真实性**：全部来自 C++ Agent 批量采样（真实 1000Hz 采样抽稀），无模拟数据；
+  段内时间相对化（t−t₀），前端按段累计成连续运行时间轴。
+- **怎么测**：3 项——生成器"已有段推送 + 运行中追加 + 结束后 StopIteration"、
+  无数据且无运行快速收尾、HTTP 层 event-stream 完整响应（data 事件计数）。
+- **面试怎么说**："'能跑'是结果，**运行中的过程数据可视化**是测试平台该有的能力：
+  曲线边跑边滚，全部来自真实采样；结束信号不是轮询猜的，是运行生命周期的自然产物
+  （live 文件清理）。"
+
 ---
 
 ## 5. 测试体系（94 项）
@@ -251,12 +297,54 @@ Robot Controller & Teach Pendant Validation Platform
 
 **节奏纪律**（面试重点讲）：每个里程碑 = **本地全量绿 → 推 CI → CI 绿后打 tag**，17 个 tag 全部可追溯。
 
-### 6.2 踩坑与根因（体现工程深度）
-1. **CI 排障链**：Ubuntu apt gRPC≈1.51 已是 fluent API（AddListeningPort 返回 ServerBuilder& + 第 3 参 selected_port，不得用 selected==0 判绑定失败）；Ubuntu 无 Protobuf CMake config → CMake 双轨；pytest agent 未就绪 → timeout + 日志防缓冲 + wait_ready 记 last_err + 候选端口重试；本机 Hyper-V 排除动态端口 → 固定候选端口。
-2. **本机工具链**：网络无法拉 vcpkg/gRPC 源码 → MSYS2 预编译包；GCC 16.2 本机无法启动（0xc0000135）→ clang++ + `-stdlib=libstdc++` 对齐 mingw64 ABI；`--unwindlib=libgcc` 避免双解卷器冲突；中文路径 → subst R:。
-3. **编译期坑**：C++ 枚举/struct 与 proto 消息重名（SlaveInput/BusFaultType）→ 改名；Linux 编译缺 `<linux/if_ether.h>`（ETH_P_ALL）。
-4. **运行时 bug（重要！）**：`reset()` 未清 `emergency_requested_`——急停复位后第一次运动会被立即打断。**安全联锁测试把它暴露了**，修复后补回归用例 `test_emergency_reset_allows_relaunch`。这正是"测试平台用异常注入发现控制器实现缺陷"的活例。
+### 6.2 问题与踩坑档案（现象 → 根因 → 解决 → 固化，体现工程深度）
 
+> 面试策略：不用背全部，但**每个问题都能讲出"现象—根因—解决—固化"四要素**，
+> 这是比"我做过 XX"可信得多的信号。按阶段组织如下。
+
+#### A. 跨平台编译与 CI（gRPC / Protobuf / 端口）
+
+| # | 现象 | 根因 | 解决 | 固化 |
+|---|---|---|---|---|
+| A1 | CI 编译报 `cannot convert grpc::ServerBuilder to const int`（main.cpp AddListeningPort 处） | Ubuntu apt gRPC≈1.51 是 **fluent API**：`AddListeningPort` 返回 `ServerBuilder&`，端口经第 3 参 `selected_port` 输出；本机 mingw64 gRPC 1.82 语义不同，"selected==0 判失败"在 Linux 恒假/恒 0 | 读 gRPC 版本行为差异：改用第 3 参 `selected_port` 判定 + 不依赖返回值；记录到设计文档 | design.md CI 排障链 |
+| A2 | `CMake Error: Could not find a package configuration file provided by "Protobuf"` | Ubuntu `libprotobuf-dev` 不提供 `ProtobufConfig.cmake`，`find_package(Protobuf)` 失败 | CMake 双轨：apt 头文件 + 手动定位 grpc_cpp_plugin / protoc；配置期失败落盘日志并随报告上传（诊断用） | CI workflow 配置期诊断步骤 |
+| A3 | pytest 全部报 `controller_agent 未就绪`（10 errors，agent 日志却显示 Listening 0.0.0.0:xxxx） | 启动竞态链：等待超时太短 / 日志缓冲未刷（stdout 未 flush）/ wait_ready 失败没记 last_err / 端口被占用导致 FATAL 退出 | 综合修复：MAX_SPAWN_ATTEMPTS=5 重试 + 候选端口轮换 + wait_ready 记录 last_err + 失败时日志落盘 reports/agent.log 上传 artifact 供诊断 | conftest spawn 逻辑 |
+| A4 | 本机/CI 偶发 `WSA10048` / 端口绑定失败 | 动态端口被 Hyper-V 排除区间占用；CI 偶发端口冲突 | 固定候选端口列表 `[50051,50551,51051,51551,52051,52551]` 按序尝试，绑定失败自动换下个 | CANDIDATE_PORTS |
+| A5 | 注解 `Node.js 20 is deprecated ... actions/checkout@v4` 被迫跑在 Node 24 | GitHub Actions 弃用 Node20 | 关注并升级 actions 到 Node24 版本（v4→v5 等），当前为 warning 不阻塞 | CI 持续维护 |
+| A6 | 注解 `ubuntu-latest 将迁移 Ubuntu 26 (2026-10-19)` | GitHub Actions runner 镜像滚动更新 | 保持追踪，必要时锁 `ubuntu-24.04` 消除不确定性 | CI 持续维护 |
+| A6 | 通知 `ubuntu-latest 将迁移 Ubuntu 26 (2026-10-19)` | runner 镜像滚动更新 | 保持追踪，必要时锁 `ubuntu-24.04` | CI 持续维护 |
+
+#### B. 本机工具链（Windows，网络受限环境）
+
+| # | 现象 | 根因 | 解决 | 固化 |
+|---|---|---|---|---|
+| B1 | vcpkg / gRPC 源码无法下载 | 本机网络受限 | MSYS2 预编译包（mingw64/clang64）落地 gRPC/Protobuf | README 工具链章节 |
+| B2 | 本机 GCC 16.2 启动即崩溃（0xc0000135） | MSYS2 GCC 与运行时 DLL 不匹配 | 改用 clang++ + `-stdlib=libstdc++` 对齐 mingw64 ABI；`--unwindlib=libgcc` 避免双解卷器冲突 | CMake toolchain 说明 |
+| B3 | 中文路径导致工具链异常 | 路径含中文（C:\Users\jh\测试开发） | subst 映射短盘符 R: | 构建脚本 |
+| B4 | 本机全量 pytest 突然全红（agent 0xC0000135 起不来） | **本 PowerShell 进程 PATH 缺 msys64**：agent 依赖 gRPC/absl DLL | 运行前 `$env:PATH` 前缀补 `msys64\mingw64\bin;msys64\usr\bin`；console 子进程用 `_subprocess_env()` 补 PATH（`RTP_MSYS_ROOT` 可覆盖） | run_tests / console._subprocess_env |
+| B5 | PowerShell 内联 heredoc 吞转义，patch 脚本执行异常 | shell 转义层过多 | **先写临时 .py 文件再执行**（如 patch_*.py），不用命令行内联 Python | 工程脚本惯例 |
+
+#### C. 控制器逻辑 bug（测试平台核心价值——异常注入发现真实缺陷）
+
+| # | 现象 | 根因 | 解决 | 固化 |
+|---|---|---|---|---|
+| C1 | 急停 Reset 后第一次运动被立即急停打断 | `reset()` 未清 `emergency_requested_` 标志 | P2.2a 安全联锁测试暴露（P0 阶段急停测试复位后没有继续运动，发现不了）；修复后补回归用例 | **test_emergency_reset_allows_relaunch**（P0 第 11 项） |
+
+#### D. 后端 / API 与前端（P3 控制台）
+
+| # | 现象 | 根因 | 解决 | 固化 |
+|---|---|---|---|---|
+| D1 | FastAPI 返回 `(dict, 404)` 被编成 JSON 数组 | FastAPI 对 tuple 返回的隐式处理 | 显式 `JSONResponse(status_code=404)` | console.py 全部错误分支 |
+| D2 | `RuntimeError: The starlette.testclient module requires the httpx2 package` | 新版 starlette TestClient 依赖 httpx2 | 依赖清单加 httpx2 | orchestrator requirements |
+| D3 | 缺陷人工状态错位：关闭 A 后 B 也被标记 | BUG 序号随运行轮次漂移（同用例不同 run 序号不同） | 人工状态以**用例名**为稳定 key 存 defect_state.json；前端显示 MANUAL 覆盖标记 | console._load_defect_state |
+| D4 | 点击展开明细后重进缓存分支不重画曲线 | detail 缓存命中直接 innerHTML，曲线容器没重新加载 | `hasTraj[runId]` 标记 + 缓存命中也调 loadTrajectory + try/catch | frontend toggleDetail |
+| D5 | `/api/waveforms/{name}` 可能被路径穿越 | 未过滤文件名 | 白名单校验（.svg 结尾 + 禁 / \ .） | console.api_waveform |
+| D6 | 实时曲线 SSE 连接后"卡住"或提前断 | 结束信号不明确：live 文件可能从未创建（无轨迹用例）或已归档 | 生成器三态：文件存在→增量推送；无数据且 is_active→等待；无数据且 !is_active→收尾；live 删除为结束信号；run 结束归档 active.jsonl | _active_stream_gen + 3 项测试 |
+| D7 | 实时曲线时间轴从 2.9e8ms 起（agent 绝对时钟） | 段内时间戳是 agent 单调时钟绝对值 | 段内时间相对化（t−t₀），前端按段累计 | conftest._capture_segment |
+
+---
+
+## 7. 高频追问应答（Q&A，最重要的一节）
 ---
 
 ## 7. 高频追问应答（Q&A，最重要的一节）
@@ -329,7 +417,7 @@ Robot Controller & Teach Pendant Validation Platform
 > 安全等级（PL/SIL）需要认证资质与真实安全 I/O。我验证的是**控制逻辑的联锁行为**（急停优先级、门 Guard Stop、Fault 复位），仿真层明确标注边界，HIL 阶段才验证真实 I/O。诚实声明边界比夸大安全结论专业得多。
 
 **Q20：这个项目简历上怎么定位？**
-> 一句话：**"机器人控制器与示教系统自动化测试平台｜C++ / Python / Linux / EtherCAT / CiA402 / PLCopen"**——多轴软硬件解耦测试架构、C++ 控制环与 Python 编排双层、Robot Profile 参数化、Simulator+Oracle 判定、CiA402/EtherCAT/示教器/安全联锁自动化验证，91 用例 CI 全绿，16 个版本里程碑。
+> 一句话：**"机器人控制器与示教系统自动化测试平台｜C++ / Python / Linux / EtherCAT / CiA402 / PLCopen"**——多轴软硬件解耦测试架构、C++ 控制环与 Python 编排双层、Robot Profile 参数化、Simulator+Oracle 判定、CiA402/EtherCAT/示教器/安全联锁自动化验证，94 用例 CI 全绿，17 个版本里程碑。
 
 **Q21：后续规划？**
 > P2.1b 真 EtherCAT HIL（SOEM 接入真机，jitter/latency 变真机验收指标）、P2.2b 真实安全 I/O、RealTPBridge 真示教器（需厂商协议资料）；运动学 FK/IK + MoveLin/MoveCirc 路径判定；管理侧 Requirement→TestCase→TestRun→Defect→Build→Release 闭环。
@@ -344,7 +432,16 @@ Robot Controller & Teach Pendant Validation Platform
 > 岗位要控制器软件、示教器软件、版本管理、设计文档——项目四者全覆盖；技术栈 C++/Python/Linux/gRPC 对齐；行业语义（PLCopen/CiA402/EtherCAT/示教器/安全联锁）是本项目的骨架而不是名词堆砌；异常注入与回归闭环直接对应测试开发职责。
 
 **Q25：如果让你真机接一台 Elfin-Pro，第一步做什么？**
-> 先建 `huayan_elfin_pro_public` Profile（公开规格：轴数、周期、限位、精度），用现有 91 用例在 Simulation 模式全量跑通基线；再 P2.1b 把 SOEM 接到真实 EtherCAT 从站（工控机 Linux + 伺服），跑 test_ethercat 核心用例对齐从站数；最后 jitter/latency/overrun 以真机实测进报告。每一步都有明确验收，不改用例只改配置。
+> 先建 `huayan_elfin_pro_public` Profile（公开规格：轴数、周期、限位、精度），用现有 94 用例在 Simulation 模式全量跑通基线；再 P2.1b 把 SOEM 接到真实 EtherCAT 从站（工控机 Linux + 伺服），跑 test_ethercat 核心用例对齐从站数；最后 jitter/latency/overrun 以真机实测进报告。每一步都有明确验收，不改用例只改配置。
+
+**Q26：实时曲线是怎么做的？数据从哪来？**
+> 运行中逐用例轨迹段由 **adapter 包装自动捕获**——每次运动指令成功后把 C++ Agent 批量回传的采样抽稀成段（≤200 点），对用例代码零侵入；每用例结束 flush 到 `active.live.jsonl`，console 用 **SSE** 增量推送，前端 EventSource 动态滚动绘制。数据 100% 来自真实采样，不是模拟。面试官如果问"运行中 Python 怎么拿逐周期数据"——答：不拿。**高频数据仍在 C++ 侧，Python 拿的是用例粒度批量结果**，实时曲线只是把这个真实结果按用例粒度流式展示，架构论断没被破坏。
+
+**Q27：为什么用 SSE 不用 WebSocket？**
+> 实时曲线是**单向推送**（服务端→前端），SSE 足够且更简单：HTTP 语义、自动断线重连、无需双向握手；WebSocket 适合需要实时上行交互的场景（比如示教器 jog 遥操作，那是另一条线，走 REST 已经够）。选型看通信方向，不是看哪个"新"。
+
+**Q28：实时曲线怎么知道运行结束了？**
+> 运行生命周期驱动：console 的后台 pytest 子进程退出时清 `_ACTIVE_RUN` 并**删除 live 文件**（结束信号）；SSE 生成器连续无新数据且无运行即收尾，前端 onerror 到 CLOSED 自动关流；历史数据已归档到 `run_dir/active.jsonl` 可回看。不是靠前端猜超时。
 
 ---
 
@@ -368,7 +465,7 @@ Robot Controller & Teach Pendant Validation Platform
 > 机器人控制器与示教系统自动化测试平台｜C++ / Python / Linux / EtherCAT / CiA402 / PLCopen
 
 **简历 300 字版：**
-> 设计多轴机器人控制器软硬件解耦测试架构，开发 C++ Controller Agent（控制环 + PLCopen 状态机）与 Python/Pytest 测试编排引擎，实现 CiA402 驱动状态机、EtherCAT 虚拟总线、Modbus/实时性量化及异常工况自动验证；构建 Robot Profile 参数化多轴仿真与 Test Oracle，对关节位置、速度钳制、状态机序列、控制周期 jitter/latency/overrun 自动判定；实现虚拟示教器（UI + Playwright）与 TP/1.0 示教器协议模拟器、安全联锁仿真（ESTOP>门>驱动器故障 + 控制器联动）；Robot Adapter 抽象支持 Simulation/HIL 一行切换。91 项用例 CI 全绿，16 个版本里程碑，测试→缺陷→回归闭环。
+> 设计多轴机器人控制器软硬件解耦测试架构，开发 C++ Controller Agent（控制环 + PLCopen 状态机）与 Python/Pytest 测试编排引擎，实现 CiA402 驱动状态机、EtherCAT 虚拟总线、Modbus/实时性量化及异常工况自动验证；构建 Robot Profile 参数化多轴仿真与 Test Oracle，对关节位置、速度钳制、状态机序列、控制周期 jitter/latency/overrun 自动判定；实现虚拟示教器（UI + Playwright）与 TP/1.0 示教器协议模拟器、安全联锁仿真（ESTOP>门>驱动器故障 + 控制器联动）；Robot Adapter 抽象支持 Simulation/HIL 一行切换。94 项用例 CI 全绿，17 个版本里程碑，测试→缺陷→回归闭环。
 
 ---
 
