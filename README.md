@@ -4,7 +4,8 @@
 
 面向多轴协作机器人控制器软件测试开发岗位的项目：以「控制器指令 → 仿真执行 → 状态采样 →
 轨迹判定 → 协议校验 → 自动报告 → 缺陷回归」为闭环的软硬件解耦自动化验证平台。
-当前实现覆盖 **P0 运动控制核心链路 + P1 现场总线/实时性/示教器/异常注入**，共 **48 项自动化用例**，
+当前实现覆盖 **P0 运动控制核心链路 + P1 现场总线/实时性/示教器/异常注入 +
+P2 抽象/安全联锁/示教器协议模拟器**，共 **74 项自动化用例**，
 本地与 GitHub Actions 双端全绿。
 
 ```
@@ -50,7 +51,7 @@ robot-test-platform/
 │   ├── app/                      #   profile.py client.py report.py waveform.py
 │   ├── oracle/                   #   position.py velocity.py trajectory.py timing.py state_machine.py
 │   ├── teach_pendant/            #   FastAPI 示教器后端 + static/index.html（五块 UI）
-│   └── tests/                    #   48 项用例（P0 10 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2）
+│   └── tests/                    #   74 项用例（P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 3 + 安全 7 + TP 9）
 ├── robot_profiles/maira_sim.yaml # 机型配置（7 轴仿真 Profile，cycle=1000Hz）
 ├── scripts/                      # generate_stubs.py / run_tests.ps1 / run_tests.sh
 ├── docs/design.md                # 软件设计文档（P0+P1）
@@ -226,11 +227,16 @@ STATE 推送帧。真示教器接入 = 厂商报文 → 本契约（RealTPBridge
 | v0.11.0-p2.2a | **SafetyService 安全联锁仿真**：ESTOP>门>驱动器故障联锁 + 控制器联动 | ✅ |
 | v0.12.0-p2.3 | **示教器协议模拟器**：TP/1.0 协议桥 + 协议客户端，UI/REST 之外的第二条示教器线 | ✅ |
 
+## 面试材料
+
+- `docs/interview-project-brief.md` — **面试版项目说明书**：一分钟讲法、架构详解、
+  74 用例矩阵、12 tag 演进、高频追问应答（25 条）、简历压缩版、面试红线。
+- `docs/design.md` — 软件设计文档；`docs/p2-design.md` — P2 规划与验收。
+
 ## 后续阶段（未实现）
 
-- **P2 规划**（详见 `docs/p2-design.md`）：P2.0 Robot Adapter 抽象（配置化切换
-  Simulation/HIL，用例零改动）→ P2.1 真 EtherCAT HIL（SOEM 主站替换虚拟总线，
-  jitter/latency 变真机验收指标）→ P2.2 FSoE 安全联锁（仿真联锁矩阵先行，
-  HIL 验证真实 I/O）→ P2.3 真示教器接入（协议模拟器 / 厂商桥）；
+- **P2 剩余 HIL**（详见 `docs/p2-design.md`）：P2.1b 真 EtherCAT HIL（SOEM 接入
+  真实从站，jitter/latency 变真机验收指标，需硬件）；P2.2b 真实安全 I/O
+  （需硬件）；RealTPBridge 真示教器（需华沿协议厂商资料）；
 - 运动学：FK/IK、TCP 轨迹 Oracle、MoveLinear/MoveCircular 路径判定；
 - 管理侧：Requirement→TestCase→TestRun→Defect→Build→Release 可追溯闭环。
