@@ -117,3 +117,103 @@ def test_console_summary_consistency(console_env):
     assert sum(by_group.values()) == st["total_cases"]
     # 缺陷来自最新失败运行
     assert len(d["defects"]["open"]) == 1
+    # summary 携带运行历史（前端运行历史区依赖）
+    assert len(d["runs"]) == 2
+
+
+# ---------------- 可操作版：触发运行 / 状态 / 明细 / 缺陷人工闭环 ----------------
+
+class _FakeProc:
+    def __init__(self, rc):
+        self._rc = rc
+
+    def poll(self):
+        return self._rc
+
+
+def test_console_run_trigger_and_status(console_env, monkeypatch):
+    import app.console as console
+
+    def fake_start(group=None):
+        console._ACTIVE_RUN = {
+            "proc": _FakeProc(None),      # poll() -> None → 运行中
+            "pid": 999,
+            "started_at": "2026-09-23T00:03:00",
+            "selector": group or "全量",
+        }
+        return {"started": True, "pid": 999, "started_at": "2026-09-23T00:03:00",
+                "selector": group or "全量"}
+
+    monkeypatch.setattr(console, "_start_test_run", fake_start)
+    r = client.post("/api/runs", json={})
+    assert r.status_code == 200
+    assert r.json()["started"] is True
+
+    s = client.get("/api/runs/status").json()
+    assert s["running"] is True
+    assert s["selector"] == "全量"
+
+    # 进程结束 → running=False 且返回最新 run
+    console._ACTIVE_RUN["proc"] = _FakeProc(0)
+    s2 = client.get("/api/runs/status").json()
+    assert s2["running"] is False
+    assert s2["latest_run"]["run_id"] == "run_20260923_002"
+    assert console._ACTIVE_RUN is None
+
+
+def test_console_run_trigger_group_and_validation(console_env, monkeypatch):
+    import app.console as console
+
+    def fake_start(group=None):
+        console._ACTIVE_RUN = {"proc": _FakeProc(None), "pid": 1000,
+                               "started_at": "2026-09-23T00:04:00", "selector": group}
+        return {"started": True, "selector": group}
+
+    monkeypatch.setattr(console, "_start_test_run", fake_start)
+    r = client.post("/api/runs", json={"group": "安全联锁"})
+    assert r.status_code == 200 and r.json()["started"]
+    # 未知分组 → 400
+    r2 = client.post("/api/runs", json={"group": "不存在分组"})
+    assert r2.status_code == 400
+
+
+def test_console_run_rejects_concurrent(console_env, monkeypatch):
+    import app.console as console
+    monkeypatch.setattr(console, "_start_test_run",
+                        lambda group=None: (_ for _ in ()).throw(RuntimeError("已有运行在进行中")))
+    r = client.post("/api/runs", json={})
+    assert r.status_code == 409
+    assert "已有运行" in r.json()["error"]
+
+
+def test_console_run_detail(console_env):
+    r = client.get("/api/runs/run_20260923_002")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["run_id"] == "run_20260923_002"
+    assert d["total"] == 2
+    assert any(c["name"] == "test_fault_x" and c["status"] == "FAIL" for c in d["cases"])
+    # 不存在 → 404
+    assert client.get("/api/runs/run_nope").status_code == 404
+
+
+def test_console_defect_manual_close_reopen(console_env):
+    # 初始：latest=002 含 FAIL → BUG-002 OPEN
+    d0 = client.get("/api/defects").json()
+    assert any(x["id"] == "BUG-002" and not x.get("manual") for x in d0["open"])
+
+    r = client.post("/api/defects/BUG-002/close", json={"reason": "人工关闭（回归确认）"})
+    assert r.status_code == 200
+    d1 = r.json()["defects"]
+    assert d1["open"] == []
+    hit = next(x for x in d1["closed"] if x["id"] == "BUG-002")
+    assert hit["manual"] is True and hit["reason"].startswith("人工关闭")
+
+    # 重开 → 回到 open（manual 标记）
+    r2 = client.post("/api/defects/BUG-002/reopen", json={})
+    d2 = r2.json()["defects"]
+    hit2 = next(x for x in d2["open"] if x["id"] == "BUG-002")
+    assert hit2["manual"] is True
+
+    # 人工状态落在注入的 REPORTS 下，不污染真实 reports
+    assert (console_env / "defect_state.json").is_file()

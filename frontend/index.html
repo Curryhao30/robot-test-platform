@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Robot Test Platform · 测试管理控制台</title>
+<title>Robot Test Platform · 测试管理控制台（可操作）</title>
 <style>
   :root {
     --bg: #0f172a; --panel: #1e293b; --panel2: #273449;
@@ -13,11 +13,19 @@
   * { box-sizing: border-box; margin: 0; }
   body { font: 14px/1.6 "Microsoft YaHei", system-ui, sans-serif; background: var(--bg); color: var(--txt); padding: 24px; }
   .wrap { max-width: 1180px; margin: 0 auto; }
-  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  header { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
   h1 { font-size: 20px; letter-spacing: .5px; }
   .badge { font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--mut); }
   .badge.ok { color: var(--ok); border-color: var(--ok); }
   .badge.bad { color: var(--bad); border-color: var(--bad); }
+  .badge.run { color: var(--warn); border-color: var(--warn); }
+  .ops { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+  select, button { font: inherit; font-size: 13px; border-radius: 6px; padding: 7px 10px; border: 1px solid var(--line); background: var(--panel2); color: var(--txt); cursor: pointer; }
+  button.primary { background: var(--acc); color: #062033; border-color: var(--acc); font-weight: 600; }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.mini { padding: 2px 8px; font-size: 11px; }
+  button.mini.close { color: var(--ok); border-color: var(--ok); }
+  button.mini.reopen { color: var(--warn); border-color: var(--warn); }
   .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
   .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
   .card .k { font-size: 12px; color: var(--mut); }
@@ -31,17 +39,26 @@
   td { border-bottom: 1px solid #26334d; padding: 5px 8px; }
   tr:last-child td { border-bottom: none; }
   .g { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; background: #24344d; color: #7dd3fc; white-space: nowrap; }
-  .run { border-bottom: 1px solid #26334d; padding: 8px 0; }
+  .st { font-size: 11px; padding: 1px 8px; border-radius: 999px; white-space: nowrap; }
+  .st.pass { background: #123f2a; color: var(--ok); }
+  .st.fail { background: #4a1520; color: var(--bad); }
+  .run { border-bottom: 1px solid #26334d; padding: 8px 0; cursor: pointer; }
   .run:last-child { border-bottom: none; }
   .run .top { display: flex; justify-content: space-between; font-size: 12px; color: var(--mut); }
   .bar { height: 6px; border-radius: 3px; background: #334155; margin-top: 5px; overflow: hidden; }
   .bar i { display: block; height: 100%; background: var(--ok); }
-  .def { display: flex; gap: 8px; font-size: 12px; padding: 5px 0; border-bottom: 1px solid #26334d; }
+  .detail { display: none; margin-top: 8px; max-height: 260px; overflow: auto; }
+  .detail.open { display: block; }
+  .def { display: flex; gap: 8px; font-size: 12px; padding: 6px 0; border-bottom: 1px solid #26334d; align-items: flex-start; }
   .def:last-child { border-bottom: none; }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); margin-top: 5px; flex: none; }
   .dot.c { background: var(--ok); }
+  .dot.m { background: var(--warn); }
+  .manual { color: var(--warn); font-size: 11px; }
   .empty { color: var(--mut); font-size: 13px; padding: 8px 0; }
   .note { color: var(--mut); font-size: 12px; margin-top: 8px; }
+  .toast { position: fixed; right: 24px; bottom: 24px; background: var(--panel2); border: 1px solid var(--line); color: var(--txt); padding: 10px 16px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity .25s; pointer-events: none; }
+  .toast.show { opacity: 1; }
   @media (max-width: 860px) { .cards { grid-template-columns: repeat(2, 1fr); } .grid { grid-template-columns: 1fr; } }
 </style>
 </head>
@@ -53,6 +70,10 @@
     <span class="badge" id="bCycle">—</span>
     <span class="badge" id="bRun">—</span>
     <span class="badge" id="bStatus">—</span>
+    <div class="ops">
+      <select id="grp"><option value="">全量运行</option></select>
+      <button class="primary" id="runBtn" disabled>运行测试</button>
+    </div>
   </header>
 
   <div class="cards">
@@ -73,25 +94,37 @@
     </div>
     <div>
       <div class="panel" style="margin-bottom:16px">
-        <h2>运行历史</h2>
+        <h2>运行历史<span style="font-weight:400;color:var(--mut)">（点击展开明细）</span></h2>
         <div id="runsBox"></div>
       </div>
       <div class="panel">
-        <h2>缺陷视图（由失败用例派生）</h2>
+        <h2>缺陷视图（自动派生 + 人工闭环）</h2>
         <div id="defectsBox"></div>
       </div>
     </div>
   </div>
 </div>
+<div class="toast" id="toast"></div>
 
 <script>
 (function () {
   var $ = function (id) { return document.getElementById(id); };
+  var pollTimer = null;
 
-  fetch('/api/summary')
-    .then(function (r) { return r.json(); })
-    .then(render)
-    .catch(function (e) { document.body.insertAdjacentHTML('beforeend', '<p class="empty">接口不可用：' + e + '</p>'); });
+  function toast(msg) {
+    var t = $('toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    clearTimeout(toast._h);
+    toast._h = setTimeout(function () { t.classList.remove('show'); }, 2600);
+  }
+
+  function refresh() {
+    fetch('/api/summary')
+      .then(function (r) { return r.json(); })
+      .then(render)
+      .catch(function (e) { $('runsBox').innerHTML = '<div class="empty">接口不可用：' + esc(e) + '</div>'; });
+  }
 
   function render(d) {
     var st = d.stats, run = d.latest_run, def = d.defects, prof = d.profile || {};
@@ -99,7 +132,7 @@
     $('bCycle').textContent = 'Cycle · ' + (d.cycle_hz || '—') + ' Hz';
     $('bRun').textContent = '最近运行 · ' + (run ? run.run_id : '—');
     var stBadge = $('bStatus');
-    if (!run) { stBadge.textContent = '无运行记录'; }
+    if (!run) { stBadge.textContent = '无运行记录'; stBadge.className = 'badge'; }
     else if (run.status === 'PASS') { stBadge.textContent = 'ALL GREEN'; stBadge.className = 'badge ok'; }
     else { stBadge.textContent = '有失败'; stBadge.className = 'badge bad'; }
 
@@ -108,10 +141,62 @@
     $('cFailed').textContent = st.last_failed;
     $('cRate').textContent = st.last_total ? (st.last_passed / st.last_total * 100).toFixed(1) + '%' : '—';
 
+    fillGroups(st.by_group || {});
     renderCases(d.cases || []);
     renderRuns(d.runs || []);
     renderDefects(def);
+    checkStatus();
   }
+
+  function fillGroups(byGroup) {
+    var sel = $('grp');
+    var cur = sel.value;
+    var names = Object.keys(byGroup).sort();
+    if (sel.options.length === names.length + 1 && cur === '') return;
+    sel.innerHTML = '<option value="">全量运行</option>' +
+      names.map(function (g) { return '<option value="' + esc(g) + '">' + esc(g) + '</option>'; }).join('');
+    sel.value = cur;
+    $('runBtn').disabled = false;
+  }
+
+  function checkStatus() {
+    fetch('/api/runs/status')
+      .then(function (r) { return r.json(); })
+      .then(function (s) {
+        var b = $('bStatus');
+        if (s.running) {
+          $('runBtn').disabled = true;
+          b.textContent = '运行中… ' + s.selector;
+          b.className = 'badge run';
+          if (!pollTimer) {
+            pollTimer = setInterval(function () {
+              fetch('/api/runs/status').then(function (r) { return r.json(); }).then(function (s2) {
+                if (!s2.running) {
+                  clearInterval(pollTimer); pollTimer = null;
+                  toast('运行完成');
+                  refresh();
+                }
+              }).catch(function () {});
+            }, 3000);
+          }
+        } else {
+          $('runBtn').disabled = false;
+          if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+        }
+      }).catch(function () {});
+  }
+
+  $('runBtn').addEventListener('click', function () {
+    var group = $('grp').value || null;
+    fetch('/api/runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(group ? { group: group } : {})
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      if (res.started) { toast('已启动运行：' + (res.selector || '全量')); refresh(); }
+      else { toast(res.error || '启动失败'); }
+    }).catch(function (e) { toast('请求失败：' + e); });
+  });
 
   function renderCases(cases) {
     var body = $('caseBody');
@@ -129,6 +214,7 @@
       });
       if (!hit) body.innerHTML = '<tr><td colspan="3" class="empty">无匹配用例</td></tr>';
     }
+    q.removeEventListener('input', draw);
     q.addEventListener('input', draw);
     draw();
   }
@@ -143,10 +229,33 @@
       var pct = r.total ? Math.round(r.passed / r.total * 100) : 0;
       d.innerHTML =
         '<div class="top"><span>' + esc(r.run_id) + ' · ' + esc(r.profile) + ' · ' + esc(r.cycle_hz) + 'Hz</span>' +
-        '<span>' + r.passed + '/' + r.total + '</span></div>' +
-        '<div class="bar"><i style="width:' + pct + '%;' + (r.status === 'FAIL' ? 'background:var(--bad)' : '') + '"></i></div>';
+        '<span>' + r.passed + '/' + r.total + ' · ' + pct + '%</span></div>' +
+        '<div class="bar"><i style="width:' + pct + '%;' + (r.status === 'FAIL' ? 'background:var(--bad)' : '') + '"></i></div>' +
+        '<div class="detail" data-rid="' + esc(r.run_id) + '"><div class="empty">加载中…</div></div>';
+      d.addEventListener('click', function () { toggleDetail(r.run_id, d); });
       box.appendChild(d);
     });
+  }
+
+  var detailCache = {};
+  function toggleDetail(runId, rowEl) {
+    var dd = rowEl.querySelector('.detail');
+    if (dd.classList.contains('open')) { dd.classList.remove('open'); return; }
+    dd.classList.add('open');
+    if (detailCache[runId]) { dd.innerHTML = detailCache[runId]; return; }
+    fetch('/api/runs/' + encodeURIComponent(runId))
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (d.error) { dd.innerHTML = '<div class="empty">' + esc(d.error) + '</div>'; return; }
+        var rows = (d.cases || []).map(function (c) {
+          var st = c.status === 'PASS' ? 'pass' : 'fail';
+          return '<tr><td>' + esc(c.name) + '</td><td><span class="st ' + st + '">' + esc(c.status) + '</span></td>' +
+                 '<td style="color:var(--mut)">' + esc(c.detail || '') + '</td><td>' + (c.duration_s || '').toFixed ? Number(c.duration_s).toFixed(2) + 's' : '' + '</td></tr>';
+        }).join('');
+        var html = '<table><thead><tr><th>用例</th><th>状态</th><th>说明</th><th>耗时</th></tr></thead><tbody>' + rows + '</tbody></table>';
+        detailCache[runId] = html;
+        dd.innerHTML = html;
+      }).catch(function (e) { dd.innerHTML = '<div class="empty">加载失败：' + esc(e) + '</div>'; });
   }
 
   function renderDefects(def) {
@@ -155,19 +264,52 @@
     var html = '';
     if (def.open.length) {
       def.open.forEach(function (x) {
-        html += '<div class="def"><span class="dot"></span><div><b>' + esc(x.id) + '</b> · ' + esc(x.case) + '<br><span style="color:var(--mut)">' + esc(x.detail) + '</span></div></div>';
+        var manual = x.manual ? '<span class="manual">· MANUAL</span>' : '';
+        html += '<div class="def"><span class="dot' + (x.manual ? ' m' : '') + '"></span><div style="flex:1">' +
+          '<b>' + esc(x.id) + '</b> · ' + esc(x.case) + manual + '<br>' +
+          '<span style="color:var(--mut)">' + esc(x.detail) + (x.reason ? '（' + esc(x.reason) + '）' : '') + '</span></div>' +
+          '<button class="mini close" data-bug="' + esc(x.id) + '" data-act="close">关闭</button></div>';
       });
     } else {
       html = '<div class="empty">' + esc(def.note) + '</div>';
     }
     if (def.closed.length) {
-      html += '<div class="def"><span class="dot c"></span><div style="color:var(--mut)">已闭环 ' + def.closed.length + ' 项（回归 PASS）</div></div>';
+      html += '<div class="def"><span class="dot c"></span><div style="color:var(--mut)">已闭环 ' + def.closed.length + ' 项</div></div>';
+      def.closed.forEach(function (x) {
+        var manual = x.manual ? '<span class="manual">· MANUAL</span>' : '';
+        html += '<div class="def"><span class="dot c"></span><div style="flex:1;color:var(--mut)">' +
+          esc(x.id) + ' · ' + esc(x.case) + manual + '<br>' + esc(x.detail) + '</div>' +
+          '<button class="mini reopen" data-bug="' + esc(x.id) + '" data-act="reopen">重开</button></div>';
+      });
     }
-    html += '<div class="note">闭环链路：失败用例 → BUG → 修复 → 回归 PASS → CLOSED（当前为只读展示）</div>';
+    html += '<div class="note">闭环链路：失败用例 → BUG → 修复 → 回归 PASS → CLOSED；可人工关闭/重开（MANUAL 覆盖自动状态）</div>';
     box.innerHTML = html;
   }
 
+  $('defectsBox').addEventListener('click', function (e) {
+    var btn = e.target.closest('button[data-bug]');
+    if (!btn) return;
+    var act = btn.getAttribute('data-act');
+    var bug = btn.getAttribute('data-bug');
+    var verb = act === 'close' ? '关闭' : '重开';
+    if (!window.confirm('确认' + verb + ' ' + bug + ' ？')) return;
+    fetch('/api/defects/' + encodeURIComponent(bug) + '/' + act, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: '控制台人工操作' })
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      if (res.ok) { toast(bug + ' 已' + verb); refresh(); }
+      else { toast(res.error || '操作失败'); }
+    }).catch(function (err) { toast('请求失败：' + err); });
+  });
+
   function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+  refresh();
+  setInterval(function () {
+    var b = $('bStatus');
+    if (b.textContent.indexOf('运行中') < 0) refresh();
+  }, 15000);
 })();
 </script>
 </body>

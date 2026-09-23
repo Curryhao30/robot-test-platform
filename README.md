@@ -5,7 +5,7 @@
 面向多轴协作机器人控制器软件测试开发岗位的项目：以「控制器指令 → 仿真执行 → 状态采样 →
 轨迹判定 → 协议校验 → 自动报告 → 缺陷回归」为闭环的软硬件解耦自动化验证平台。
 当前实现覆盖 **P0 运动控制核心链路 + P1 现场总线/实时性/示教器/异常注入 +
-P2 抽象/安全联锁/示教器协议模拟器**，共 **78 项自动化用例**，
+P2 抽象/安全联锁/示教器协议模拟器**，共 **83 项自动化用例**，
 本地与 GitHub Actions 双端全绿。
 
 ```
@@ -51,8 +51,8 @@ robot-test-platform/
 │   ├── app/                      #   profile.py client.py report.py waveform.py
 │   ├── oracle/                   #   position.py velocity.py trajectory.py timing.py state_machine.py
 │   ├── teach_pendant/            #   FastAPI 示教器后端 + static/index.html（五块 UI）
-│   ├── frontend/index.html        #   管理控制台（P3：零依赖单页，用例/运行/缺陷视图）
-│   └── tests/                    #   78 项用例（P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 3 + 安全 7 + TP 9 + Console 4）
+│   ├── frontend/index.html        #   管理控制台（P3-ops：零依赖单页，可触发运行/查看明细/闭环缺陷）
+│   └── tests/                    #   83 项用例（P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 3 + 安全 7 + TP 9 + Console 9）
 ├── robot_profiles/maira_sim.yaml # 机型配置（7 轴仿真 Profile，cycle=1000Hz）
 ├── scripts/                      # generate_stubs.py / run_tests.ps1 / run_tests.sh
 ├── docs/design.md                # 软件设计文档（P0+P1）
@@ -98,7 +98,7 @@ cd orchestrator; ..\.venv\Scripts\python -m pytest -v
 agent 进程由 conftest 自动拉起（候选端口 50051/50551/51051/51551/52051/52551 自动重试，
 `RTP_AGENT_BIN` 可覆盖路径）。
 
-## 测试矩阵（78 项）
+## 测试矩阵（83 项）
 
 ### P0 运动控制核心（11 项）—— `tests/test_p0_core.py`
 
@@ -164,7 +164,7 @@ Playwright 端到端 8 用例：五块布局、tab 切换、**Servo ON 真实使
   非法类型 / HIL 缺 endpoint 直接报错；
 - `connect_hil(profile)`：HIL 端点不可达时抛清晰错误（不挂死、不静默回退）；
 - conftest 按 adapter 类型选择：simulation 拉起 C++ Agent 并包装为
-  GrpcAdapter；hil 直连真机盒子——**78 项用例零改动切换**。
+  GrpcAdapter；hil 直连真机盒子——**83 项用例零改动切换**。
 
 ### P2.1a SOEM EtherCAT 主站骨架（3 项）—— `tests/test_p2_soem.py`
 
@@ -213,7 +213,8 @@ STATE 推送帧。真示教器接入 = 厂商报文 → 本契约（RealTPBridge
   `/api/summary`（一次拉全）；
 - 前端：`frontend/index.html` 单页（无脚手架、无外部依赖）——用例清单
   实时搜索、运行历史通过率条、缺陷面板；
-- 测试：`test_console.py` 4 项（清单结构 / 运行历史 / 全绿缺陷视图 / 汇总一致性）；
+- 测试：`test_console.py` 9 项（清单结构 / 运行历史 / 缺陷自动闭环 / 汇总一致性 /
+  触发运行 / 运行状态轮询 / 分组与参数校验 / 并发拒绝 / 运行明细 / 缺陷人工关闭·重开）；
 - 基建治理：conftest 报告写盘增加 `RTP_WRITE_REPORT=1` 门控——VSCode
   局部调试不再污染 `reports/run_*` 运行历史。
 
@@ -252,11 +253,12 @@ cd orchestrator
 | v0.11.0-p2.2a | **SafetyService 安全联锁仿真**：ESTOP>门>驱动器故障联锁 + 控制器联动 | ✅ |
 | v0.12.0-p2.3 | **示教器协议模拟器**：TP/1.0 协议桥 + 协议客户端，UI/REST 之外的第二条示教器线 | ✅ |
 | v0.13.0-p3 | **管理控制台**：console 只读 API + 零依赖单页前端（用例/运行/缺陷视图），报告写盘门控 | ✅ |
+| v0.14.0-p3-ops | **可操作控制台**：触发运行（全量/分组）+ 进度轮询 + 运行明细 + 缺陷人工关闭/重开 | ✅ |
 
 ## 面试材料
 
 - `docs/interview-project-brief.md` — **面试版项目说明书**：一分钟讲法、架构详解、
-  78 用例矩阵、13 tag 演进、高频追问应答（25 条）、简历压缩版、面试红线。
+  83 用例矩阵、14 tag 演进、高频追问应答（25 条）、简历压缩版、面试红线。
 - `docs/design.md` — 软件设计文档；`docs/p2-design.md` — P2 规划与验收。
 
 ## 后续阶段（未实现）
