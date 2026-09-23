@@ -125,6 +125,14 @@ def reset():
             "error_message": r.error_message, "motion_state": r.motion_state}
 
 
+@app.post("/api/home")
+def home():
+    c = _require()
+    r = c.home()
+    return {"ok": r.ok, "error_code": r.error_code,
+            "error_message": r.error_message, "motion_state": r.motion_state}
+
+
 @app.post("/api/move_absolute")
 def move_abs(req: MoveAbsRequest):
     c = _require()

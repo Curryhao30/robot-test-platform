@@ -41,7 +41,7 @@ Robot Controller & Teach Pendant Validation Platform
 | 岗位职责（JD） | 项目对应 | 面试怎么讲 |
 |---|---|---|
 | 负责控制器的软件开发 | C++ Controller Agent（控制环 / PLCopen 状态机 / 采样） | "我实现了控制器的运动执行与状态机，并用测试反向驱动设计" |
-| 负责示教器的软件开发 | 虚拟示教器（五块 UI + REST）+ TP/1.0 示教器协议模拟器 | "示教器被抽象成客户端，UI 与协议模拟器共享控制器契约" |
+| 负责示教器的软件开发 | 虚拟示教器（五块 UI + REST）+ TP/1.0 示教器协议模拟器 + PyQt5 桌面面板 | "示教器被抽象成客户端，浏览器 UI / 桌面 QT 面板 / 协议模拟器共享同一控制器契约" |
 | 管理软件 BUG，管理并发布软件版本 | CI 全绿 + 14 个版本 tag + 测试→缺陷→回归闭环（用例发现 bug 后补回归用例） | "每个里程碑：本地全量绿 → 推 CI → 绿后打 tag，可追溯" |
 | 编写软件设计文档 | docs/design.md、docs/p2-design.md、README 项目说明书 | "设计文档覆盖架构、协议、模块、验收、版本记录" |
 
@@ -55,7 +55,7 @@ Robot Controller & Teach Pendant Validation Platform
 | 编排层 | **Python 3.11 + pytest** | 用例组织、数据判定、报告生成效率高；与 C++ 通过 gRPC 解耦 |
 | 跨语言 | **gRPC + Protobuf** | 强类型接口契约（.proto 即文档）、天然跨语言；一次命令 + 批量回传符合测试模型 |
 | 配置 | **YAML Robot Profile** | 机型参数集中化，测试引擎零改动支持多机型 |
-| 示教器 | **FastAPI + 原生 HTML/JS + Playwright** | UI 端到端自动化，断言"操作真实改变控制器状态"而非只点按钮 |
+| 示教器 | **FastAPI + 原生 HTML/JS + Playwright + PyQt5 桌面 HMI** | 浏览器 UI 与桌面 QT 面板共享同一 REST 契约；UI 端到端自动化，断言"操作真实改变控制器状态" |
 | 协议模拟 | **TCP 行分隔 JSON 帧（TP/1.0）** | 无第三方依赖、帧校验严格、模拟真实示教器协议线 |
 | 报告/波形 | **纯 Python / 零依赖 SVG** | CI 与面试机零额外安装（不依赖 matplotlib） |
 | 本机工具链 | **MSYS2 clang64 + mingw64 预编译包** | 网络受限环境下唯一可落地路线（vcpkg/GCC 均不可用），详见 §6 |
@@ -72,6 +72,7 @@ Robot Controller & Teach Pendant Validation Platform
 ├───────────────────────────────────────────────────────────┤
 │ TP/1.0 协议模拟器（TCP 桥 + 协议客户端，CLI 可独立跑）       │  示教器客户端②（TP 协议线）
 │  tp_bridge ↔ tp_simulator                                  │
+│ PyQt5 桌面示教器面板（.ui + 业务类，QNetworkAccessManager 调 REST）│  示教器客户端③（QT HMI）
 ├───────────────────────────────────────────────────────────┤
 │ Test Orchestrator（Python/Pytest）                         │  测试编排层
 │  Case 调度 · RobotAdapter · Profile · Oracle · 报告/波形   │
@@ -171,6 +172,19 @@ Robot Controller & Teach Pendant Validation Platform
 - **怎么测**：`test_console.py` 9 项——清单结构、运行历史结构、自动闭环语义、汇总一致性 + 触发运行（fake runner 注入）、运行中状态、分组与未知分组 400、并发 409、运行明细 404、人工关闭/重开（状态落在注入的 REPORTS，不污染真实数据）。
 - **工程细节**：后台运行用 subprocess 隔离（同一时间仅一个，运行中按钮禁用）；缺陷人工状态以用例名为稳定 key 存 defect_state.json（BUG 序号随运行轮次漂移，不能做 key）；人工状态覆盖自动派生并标 MANUAL。
 - **面试怎么说**："管理侧从只读升级为可操作：在页面上触发一次真实测试运行、看逐用例明细、人工关闭/重开缺陷——测试数据和缺陷的关系是自动化的，人工操作以状态文件覆盖自动状态且全部可回溯。"
+
+### 4.15 PyQt5 桌面示教器面板（示教器客户端③，补齐 QT 缺口）
+- **干什么**：`teach_pendant/qt_panel.py`（业务类）+ `qt_panel.ui`（Qt Designer UI）+ `ui_qt_panel.py`（pyuic5 生成）。用 `QNetworkAccessManager`（QT 原生异步网络栈）调 teach_pendant REST（`/api/servo`、`/api/jog`、`/api/status`、`/api/home`、`/api/alarm`、`/api/move_absolute`），是示教器的**桌面 HMI** 第三客户端，与浏览器 UI、TP/1.0 协议模拟器共享同一控制器契约。
+- **工程结构（贴近工业 Qt Creator 工作流）**：`qt_panel.ui`（设计）→ `pyuic5 qt_panel.ui -o ui_qt_panel.py`（生成 UI 类，勿手改）→ `qt_panel.py`（业务类 `QTTeachPendant(QMainWindow, Ui_QtTeachPendant)`，加载 UI + 信号连接 + 控制逻辑）。改 UI 只重跑 pyuic5，业务代码零触碰。
+- **功能**：7 关节实时角度读数（500ms 轮询）、每关节 +/− 增量 jog、Servo ON/OFF、Stop、Reset、**Home 回零**、Move Absolute、报警面板、操作日志、状态 LED。
+- **两种运行模式**：真实模式（先起 `uvicorn teach_pendant.main:app`，连控制器 gRPC）；`--mock` 离线模式（内置 `MockBackend` 仿真控制器，无需 agent 即可演示，直接给面试官看 jog/回零/报警）。
+- **怎么验证**：`py_compile` + 无头（`QT_QPA_PLATFORM=offscreen`）构建窗口；`--mock` 下 servo→jog→home 关节回零逻辑通过。PyQt5 仅面板依赖，**不进 pytest/CI**（避免 GUI 环境耦合，保持 83 用例全绿）。
+- **面试怎么说**："岗位要求 QT/HMI，我补了一个 PyQt5 桌面示教器面板——Qt Designer 画 UI、pyuic 生成代码、业务类接管逻辑，是工业 Qt 标准分工；网络走 QT 原生 QNetworkAccessManager 而非裸 socket，一看就是正经 QT 工程结构，不是脚本玩具。"
+- **截图/录屏指引（简历素材）**：
+  1. 离线演示最快：`python -m teach_pendant.qt_panel --mock` → 点 **Servo ON** → 各关节 `+/−` 按钮使能 → 连点 J0 `+` 看读数实时 +5° 递增 → 点 **Home** 全部回零。
+  2. 截图点：① 使能后状态 LED 变绿 + 关节读数；② jog 后某关节非零；③ Home 后全部归零且 Log 出现 `home: {...}`。
+  3. 录屏（OBS/ShareX，15~30s）：Servo ON → J2 连点 + → Home 回零，旁白"这是 PyQt5 写的示教器桌面端，复用同一套控制器 REST 契约"。
+  4. 真实模式（有 agent 时）：先 `python -m uvicorn teach_pendant.main:app --port 58081`，再 `python -m teach_pendant.qt_panel --url http://127.0.0.1:58081`，操作会真实改变控制器关节状态（与 Playwright 用例同语义）。
 
 ---
 
