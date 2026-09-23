@@ -96,6 +96,8 @@ jobs:
           wait $AGENT_PID 2>/dev/null || true
 
       - name: Run pytest (P0)
+        env:
+          RTP_WRITE_REPORT: "1"
         run: |
           cd orchestrator
           set +e

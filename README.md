@@ -5,7 +5,7 @@
 面向多轴协作机器人控制器软件测试开发岗位的项目：以「控制器指令 → 仿真执行 → 状态采样 →
 轨迹判定 → 协议校验 → 自动报告 → 缺陷回归」为闭环的软硬件解耦自动化验证平台。
 当前实现覆盖 **P0 运动控制核心链路 + P1 现场总线/实时性/示教器/异常注入 +
-P2 抽象/安全联锁/示教器协议模拟器**，共 **74 项自动化用例**，
+P2 抽象/安全联锁/示教器协议模拟器**，共 **78 项自动化用例**，
 本地与 GitHub Actions 双端全绿。
 
 ```
@@ -51,7 +51,8 @@ robot-test-platform/
 │   ├── app/                      #   profile.py client.py report.py waveform.py
 │   ├── oracle/                   #   position.py velocity.py trajectory.py timing.py state_machine.py
 │   ├── teach_pendant/            #   FastAPI 示教器后端 + static/index.html（五块 UI）
-│   └── tests/                    #   74 项用例（P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 3 + 安全 7 + TP 9）
+│   ├── frontend/index.html        #   管理控制台（P3：零依赖单页，用例/运行/缺陷视图）
+│   └── tests/                    #   78 项用例（P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 3 + 安全 7 + TP 9 + Console 4）
 ├── robot_profiles/maira_sim.yaml # 机型配置（7 轴仿真 Profile，cycle=1000Hz）
 ├── scripts/                      # generate_stubs.py / run_tests.ps1 / run_tests.sh
 ├── docs/design.md                # 软件设计文档（P0+P1）
@@ -97,9 +98,9 @@ cd orchestrator; ..\.venv\Scripts\python -m pytest -v
 agent 进程由 conftest 自动拉起（候选端口 50051/50551/51051/51551/52051/52551 自动重试，
 `RTP_AGENT_BIN` 可覆盖路径）。
 
-## 测试矩阵（48 项）
+## 测试矩阵（78 项）
 
-### P0 运动控制核心（10 项）—— `tests/test_p0_core.py`
+### P0 运动控制核心（11 项）—— `tests/test_p0_core.py`
 
 | # | 用例 | 覆盖点 |
 |---|------|--------|
@@ -113,6 +114,7 @@ agent 进程由 conftest 自动拉起（候选端口 50051/50551/51051/51551/520
 | 8 | test_move_without_enable | 未使能运动 → NOT_ENABLED |
 | 9 | test_emergency_stop_and_reset | 急停 FAULT → 拒绝运动 → Reset 恢复 |
 | 10 | test_new_command_aborts_previous | 运动中新命令 → 旧命令 CommandAborted |
+| 11 | test_emergency_reset_allows_relaunch | 急停 Reset 后必须能重新运动（P2.2a 暴露的 P0 回归） |
 
 ### P1-1 CiA402 驱动状态机（12 项）—— `tests/test_cia402.py`
 
@@ -162,7 +164,7 @@ Playwright 端到端 8 用例：五块布局、tab 切换、**Servo ON 真实使
   非法类型 / HIL 缺 endpoint 直接报错；
 - `connect_hil(profile)`：HIL 端点不可达时抛清晰错误（不挂死、不静默回退）；
 - conftest 按 adapter 类型选择：simulation 拉起 C++ Agent 并包装为
-  GrpcAdapter；hil 直连真机盒子——**48 项 P0/P1 用例零改动切换**。
+  GrpcAdapter；hil 直连真机盒子——**78 项用例零改动切换**。
 
 ### P2.1a SOEM EtherCAT 主站骨架（3 项）—— `tests/test_p2_soem.py`
 
@@ -200,6 +202,29 @@ STATE 推送帧。真示教器接入 = 厂商报文 → 本契约（RealTPBridge
 `latency_*.svg`）：jitter 波形（vs 名义周期）、latency 波形（overrun 阈值红线 +
 超标段红色高亮）。断言数组长度、统计自洽、SVG 生成。
 
+## 管理控制台（P3）
+
+零依赖单页控制台（不另做 Jira，数据来自真实运行产物）：
+
+- 后端：`orchestrator/app/console.py` 只读 REST API ——
+  `/api/cases`（AST 扫描 tests/*.py 的 78 项用例与 11 个分组）、
+  `/api/runs`（reports/run_*/result.json 运行历史）、
+  `/api/defects`（由失败用例派生的缺陷视图与闭环状态）、
+  `/api/summary`（一次拉全）；
+- 前端：`frontend/index.html` 单页（无脚手架、无外部依赖）——用例清单
+  实时搜索、运行历史通过率条、缺陷面板；
+- 测试：`test_console.py` 4 项（清单结构 / 运行历史 / 全绿缺陷视图 / 汇总一致性）；
+- 基建治理：conftest 报告写盘增加 `RTP_WRITE_REPORT=1` 门控——VSCode
+  局部调试不再污染 `reports/run_*` 运行历史。
+
+启动（演示）：
+
+```powershell
+cd orchestrator
+..\.venv\Scripts\python -m uvicorn app.console:app --port 58090
+# 浏览器打开 frontend/index.html（或由 uvicorn 挂静态目录同源访问）
+```
+
 ## 报告
 
 每次 pytest 会话结束自动生成 `reports/run_YYYYMMDD_NNN/`：
@@ -226,11 +251,12 @@ STATE 推送帧。真示教器接入 = 厂商报文 → 本契约（RealTPBridge
 | v0.10.0-p2.1a | **EthercatMaster 抽象 + SOEM 骨架**：--bus 切换，无网卡/非 Linux 清晰 FATAL | ✅ |
 | v0.11.0-p2.2a | **SafetyService 安全联锁仿真**：ESTOP>门>驱动器故障联锁 + 控制器联动 | ✅ |
 | v0.12.0-p2.3 | **示教器协议模拟器**：TP/1.0 协议桥 + 协议客户端，UI/REST 之外的第二条示教器线 | ✅ |
+| v0.13.0-p3 | **管理控制台**：console 只读 API + 零依赖单页前端（用例/运行/缺陷视图），报告写盘门控 | ✅ |
 
 ## 面试材料
 
 - `docs/interview-project-brief.md` — **面试版项目说明书**：一分钟讲法、架构详解、
-  74 用例矩阵、12 tag 演进、高频追问应答（25 条）、简历压缩版、面试红线。
+  78 用例矩阵、13 tag 演进、高频追问应答（25 条）、简历压缩版、面试红线。
 - `docs/design.md` — 软件设计文档；`docs/p2-design.md` — P2 规划与验收。
 
 ## 后续阶段（未实现）
@@ -239,4 +265,5 @@ STATE 推送帧。真示教器接入 = 厂商报文 → 本契约（RealTPBridge
   真实从站，jitter/latency 变真机验收指标，需硬件）；P2.2b 真实安全 I/O
   （需硬件）；RealTPBridge 真示教器（需华沿协议厂商资料）；
 - 运动学：FK/IK、TCP 轨迹 Oracle、MoveLinear/MoveCircular 路径判定；
-- 管理侧：Requirement→TestCase→TestRun→Defect→Build→Release 可追溯闭环。
+- 管理侧：Requirement→TestCase→TestRun→Defect→Build→Release 可追溯闭环的
+  写操作（手动建 BUG/分配/关闭、版本发布）——v0.13.0-p3 已提供只读派生视图。

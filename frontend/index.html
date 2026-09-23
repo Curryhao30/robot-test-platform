@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robot Test Platform · 测试管理控制台</title>
+<style>
+  :root {
+    --bg: #0f172a; --panel: #1e293b; --panel2: #273449;
+    --line: #334155; --txt: #e2e8f0; --mut: #94a3b8;
+    --ok: #22c55e; --bad: #ef4444; --acc: #38bdf8; --warn: #f59e0b;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  body { font: 14px/1.6 "Microsoft YaHei", system-ui, sans-serif; background: var(--bg); color: var(--txt); padding: 24px; }
+  .wrap { max-width: 1180px; margin: 0 auto; }
+  header { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; margin-bottom: 18px; }
+  h1 { font-size: 20px; letter-spacing: .5px; }
+  .badge { font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid var(--line); color: var(--mut); }
+  .badge.ok { color: var(--ok); border-color: var(--ok); }
+  .badge.bad { color: var(--bad); border-color: var(--bad); }
+  .cards { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .card .k { font-size: 12px; color: var(--mut); }
+  .card .v { font-size: 26px; font-weight: 700; margin-top: 2px; }
+  .grid { display: grid; grid-template-columns: 1.6fr 1fr; gap: 12px; margin-bottom: 16px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .panel h2 { font-size: 14px; margin-bottom: 10px; color: var(--txt); display: flex; align-items: center; gap: 8px; }
+  input[type=search] { width: 100%; background: var(--panel2); border: 1px solid var(--line); color: var(--txt); border-radius: 6px; padding: 7px 10px; font-size: 13px; margin-bottom: 10px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; color: var(--mut); font-weight: 600; border-bottom: 1px solid var(--line); padding: 6px 8px; }
+  td { border-bottom: 1px solid #26334d; padding: 5px 8px; }
+  tr:last-child td { border-bottom: none; }
+  .g { display: inline-block; font-size: 11px; padding: 1px 8px; border-radius: 999px; background: #24344d; color: #7dd3fc; white-space: nowrap; }
+  .run { border-bottom: 1px solid #26334d; padding: 8px 0; }
+  .run:last-child { border-bottom: none; }
+  .run .top { display: flex; justify-content: space-between; font-size: 12px; color: var(--mut); }
+  .bar { height: 6px; border-radius: 3px; background: #334155; margin-top: 5px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--ok); }
+  .def { display: flex; gap: 8px; font-size: 12px; padding: 5px 0; border-bottom: 1px solid #26334d; }
+  .def:last-child { border-bottom: none; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--bad); margin-top: 5px; flex: none; }
+  .dot.c { background: var(--ok); }
+  .empty { color: var(--mut); font-size: 13px; padding: 8px 0; }
+  .note { color: var(--mut); font-size: 12px; margin-top: 8px; }
+  @media (max-width: 860px) { .cards { grid-template-columns: repeat(2, 1fr); } .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Robot Test Platform</h1>
+    <span class="badge" id="bProfile">—</span>
+    <span class="badge" id="bCycle">—</span>
+    <span class="badge" id="bRun">—</span>
+    <span class="badge" id="bStatus">—</span>
+  </header>
+
+  <div class="cards">
+    <div class="card"><div class="k">用例总数</div><div class="v" id="cTotal">—</div></div>
+    <div class="card"><div class="k">最近运行 · 通过</div><div class="v" style="color:var(--ok)" id="cPassed">—</div></div>
+    <div class="card"><div class="k">最近运行 · 失败</div><div class="v" style="color:var(--bad)" id="cFailed">—</div></div>
+    <div class="card"><div class="k">通过率</div><div class="v" id="cRate">—</div></div>
+  </div>
+
+  <div class="grid">
+    <div class="panel">
+      <h2>用例清单（按分组）</h2>
+      <input type="search" id="q" placeholder="搜索用例名 / 分组…">
+      <table>
+        <thead><tr><th>用例</th><th>分组</th><th>来源文件</th></tr></thead>
+        <tbody id="caseBody"></tbody>
+      </table>
+    </div>
+    <div>
+      <div class="panel" style="margin-bottom:16px">
+        <h2>运行历史</h2>
+        <div id="runsBox"></div>
+      </div>
+      <div class="panel">
+        <h2>缺陷视图（由失败用例派生）</h2>
+        <div id="defectsBox"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+
+  fetch('/api/summary')
+    .then(function (r) { return r.json(); })
+    .then(render)
+    .catch(function (e) { document.body.insertAdjacentHTML('beforeend', '<p class="empty">接口不可用：' + e + '</p>'); });
+
+  function render(d) {
+    var st = d.stats, run = d.latest_run, def = d.defects, prof = d.profile || {};
+    $('bProfile').textContent = 'Profile · ' + (prof.name || '—');
+    $('bCycle').textContent = 'Cycle · ' + (d.cycle_hz || '—') + ' Hz';
+    $('bRun').textContent = '最近运行 · ' + (run ? run.run_id : '—');
+    var stBadge = $('bStatus');
+    if (!run) { stBadge.textContent = '无运行记录'; }
+    else if (run.status === 'PASS') { stBadge.textContent = 'ALL GREEN'; stBadge.className = 'badge ok'; }
+    else { stBadge.textContent = '有失败'; stBadge.className = 'badge bad'; }
+
+    $('cTotal').textContent = st.total_cases;
+    $('cPassed').textContent = st.last_passed;
+    $('cFailed').textContent = st.last_failed;
+    $('cRate').textContent = st.last_total ? (st.last_passed / st.last_total * 100).toFixed(1) + '%' : '—';
+
+    renderCases(d.cases || []);
+    renderRuns(d.runs || []);
+    renderDefects(def);
+  }
+
+  function renderCases(cases) {
+    var body = $('caseBody');
+    var q = $('q');
+    function draw() {
+      var kw = q.value.trim().toLowerCase();
+      body.innerHTML = '';
+      var hit = 0;
+      cases.forEach(function (c) {
+        if (kw && c.name.toLowerCase().indexOf(kw) < 0 && c.group.toLowerCase().indexOf(kw) < 0) return;
+        hit++;
+        var tr = document.createElement('tr');
+        tr.innerHTML = '<td>' + esc(c.name) + '</td><td><span class="g">' + esc(c.group) + '</span></td><td style="color:var(--mut)">' + esc(c.file) + '</td>';
+        body.appendChild(tr);
+      });
+      if (!hit) body.innerHTML = '<tr><td colspan="3" class="empty">无匹配用例</td></tr>';
+    }
+    q.addEventListener('input', draw);
+    draw();
+  }
+
+  function renderRuns(runs) {
+    var box = $('runsBox');
+    if (!runs.length) { box.innerHTML = '<div class="empty">暂无运行记录</div>'; return; }
+    box.innerHTML = '';
+    runs.forEach(function (r) {
+      var d = document.createElement('div');
+      d.className = 'run';
+      var pct = r.total ? Math.round(r.passed / r.total * 100) : 0;
+      d.innerHTML =
+        '<div class="top"><span>' + esc(r.run_id) + ' · ' + esc(r.profile) + ' · ' + esc(r.cycle_hz) + 'Hz</span>' +
+        '<span>' + r.passed + '/' + r.total + '</span></div>' +
+        '<div class="bar"><i style="width:' + pct + '%;' + (r.status === 'FAIL' ? 'background:var(--bad)' : '') + '"></i></div>';
+      box.appendChild(d);
+    });
+  }
+
+  function renderDefects(def) {
+    var box = $('defectsBox');
+    if (!def || !def.latest_run) { box.innerHTML = '<div class="empty">尚无运行记录</div>'; return; }
+    var html = '';
+    if (def.open.length) {
+      def.open.forEach(function (x) {
+        html += '<div class="def"><span class="dot"></span><div><b>' + esc(x.id) + '</b> · ' + esc(x.case) + '<br><span style="color:var(--mut)">' + esc(x.detail) + '</span></div></div>';
+      });
+    } else {
+      html = '<div class="empty">' + esc(def.note) + '</div>';
+    }
+    if (def.closed.length) {
+      html += '<div class="def"><span class="dot c"></span><div style="color:var(--mut)">已闭环 ' + def.closed.length + ' 项（回归 PASS）</div></div>';
+    }
+    html += '<div class="note">闭环链路：失败用例 → BUG → 修复 → 回归 PASS → CLOSED（当前为只读展示）</div>';
+    box.innerHTML = html;
+  }
+
+  function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+})();
+</script>
+</body>
+</html>

@@ -25,5 +25,6 @@ cmake --build "$BUILD" --config Release --target controller_agent -j"$(nproc)"
 "$VENV_PY" scripts/generate_stubs.py
 
 # 5) 运行 P0 测试
+export RTP_WRITE_REPORT=1
 cd orchestrator
 "$VENV_PY" -m pytest

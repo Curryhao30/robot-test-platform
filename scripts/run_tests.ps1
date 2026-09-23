@@ -44,6 +44,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 & $venvPy (Join-Path $root "scripts\generate_stubs.py")
 
 # 6) 运行 P0 测试（agent 由 conftest 自动拉起，默认找 build/controller-agent/controller_agent.exe）
+$env:RTP_WRITE_REPORT = "1"
 Push-Location (Join-Path $root "orchestrator")
 & $venvPy -m pytest -v
 $code = $LASTEXITCODE

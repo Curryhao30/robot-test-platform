@@ -151,7 +151,12 @@ def client(profile) -> "RobotAdapter":
 
 @pytest.fixture(scope="session", autouse=True)
 def _run_context(profile):
-    """会话级运行上下文：记录用例结果，结束时写报告。"""
+    """会话级运行上下文：记录用例结果，结束时写报告。
+
+    写盘由 RTP_WRITE_REPORT=1 门控（run_tests.ps1/.sh、CI 设置）：
+    普通 pytest（VSCode 面板单文件/局部调试）不落盘，避免污染
+    reports/run_* 运行历史（控制台 /api/runs 依赖其干净）。
+    """
     global _context, _run_dir
     _context = RunContext(
         profile_name=profile.name,
@@ -160,7 +165,10 @@ def _run_context(profile):
         cycle_hz=profile.cycle_hz,
         port=_agent_port,
     )
-    _run_dir = next_run_dir(REPO / "reports")
+    if os.environ.get("RTP_WRITE_REPORT") == "1":
+        _run_dir = next_run_dir(REPO / "reports")
+    else:
+        _run_dir = None
     yield _context
     if _run_dir is not None:
         write_run(_context, _run_dir, trajectory=capture.TRAJECTORY)
