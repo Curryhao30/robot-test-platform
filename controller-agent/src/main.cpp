@@ -14,6 +14,7 @@
 #include "robottest/controller_agent.hpp"
 #include "robottest/virtual_drive.hpp"
 #include "robottest/virtual_ethercat.hpp"
+#include "robottest/soem_ethercat_bus.hpp"
 
 namespace {
 
@@ -263,7 +264,7 @@ private:
 class EthercatServiceImpl final
     : public robottest::EthercatService::Service {
 public:
-    explicit EthercatServiceImpl(robottest::VirtualEthercatBus& bus)
+    explicit EthercatServiceImpl(robottest::EthercatMaster& bus)
         : bus_(bus) {}
 
     grpc::Status BusInfo(grpc::ServerContext*,
@@ -385,7 +386,7 @@ public:
     }
 
 private:
-    robottest::VirtualEthercatBus& bus_;
+    robottest::EthercatMaster& bus_;
 };
 
 // ---------------------------------------------------------------------------
@@ -421,13 +422,20 @@ bool load_profile(const std::string& path,
 int main(int argc, char** argv) {
     std::string profile_path;
     int port = 50051;
+    std::string bus_mode = "virtual";  // virtual | soem（P2.1a 骨架）
+    std::string soem_iface;
+    int soem_slaves = 0;
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "--profile" && i + 1 < argc) profile_path = argv[++i];
         else if (a == "--port" && i + 1 < argc) port = std::stoi(argv[++i]);
+        else if (a == "--bus" && i + 1 < argc) bus_mode = argv[++i];
+        else if (a == "--iface" && i + 1 < argc) soem_iface = argv[++i];
+        else if (a == "--slaves" && i + 1 < argc) soem_slaves = std::stoi(argv[++i]);
     }
     if (profile_path.empty()) {
         std::cerr << "usage: controller_agent --profile <profile.yaml> [--port N]"
+                     " [--bus virtual|soem] [--iface eth0] [--slaves N]"
                   << std::endl;
         return 2;
     }
@@ -436,6 +444,24 @@ int main(int argc, char** argv) {
     int cycle_hz = 1000;
     std::string name;
     if (!load_profile(profile_path, limits, cycle_hz, name)) return 1;
+
+    // P1-2 / P2.1a：EtherCAT 总线模式校验——必须先于控制环启动完成，
+    // 避免带线程的 ControllerAgent 析构触发 std::terminate。
+    // SOEM 骨架：真机接入点——init 失败（P2.1a 尚未实现从站扫描 / 无网卡 /
+    // 非 Linux）时 FATAL 退出并给出清晰原因，不挂死、不冒充真机已连接。
+    robottest::SoemEthercatBus soem_bus(soem_iface.empty() ? "eth0" : soem_iface,
+                                        soem_slaves > 0 ? soem_slaves : 7, cycle_hz);
+    if (bus_mode == "soem") {
+        std::string ierr;
+        soem_bus.init(ierr);  // P2.1a 骨架：必然失败并给出原因
+        std::cerr << "[FATAL] " << ierr << std::endl;
+        std::cout << "[agent] FATAL " << ierr << std::endl;
+        return 3;
+    } else if (bus_mode != "virtual") {
+        std::cerr << "[FATAL] 未知 --bus " << bus_mode
+                  << "（可用: virtual | soem）" << std::endl;
+        return 2;
+    }
 
     robottest::ControllerAgent agent(limits, cycle_hz, name);
     agent.start_control_loop();
@@ -447,8 +473,9 @@ int main(int argc, char** argv) {
         drives.emplace_back(static_cast<int>(i));
     }
 
-    // P1-2：虚拟 EtherCAT 总线（周期 PDO 交换），驱动 7 个从站
-    robottest::VirtualEthercatBus bus(drives, cycle_hz);
+    // 虚拟总线：周期 PDO 交换驱动 7 个从站（仿真，默认 --bus virtual）
+    robottest::VirtualEthercatBus virtual_bus(drives, cycle_hz);
+    robottest::EthercatMaster* bus = &virtual_bus;
 
     const std::string addr = "0.0.0.0:" + std::to_string(port);
     grpc::ServerBuilder builder;
@@ -461,7 +488,7 @@ int main(int argc, char** argv) {
     std::cout << "[agent] PORT=" << actual << std::endl;
     ControllerServiceImpl service(agent);
     Cia402ServiceImpl cia402_service(drives);
-    EthercatServiceImpl ethercat_service(bus);
+    EthercatServiceImpl ethercat_service(*bus);
     builder.RegisterService(&service);
     builder.RegisterService(&cia402_service);
     builder.RegisterService(&ethercat_service);
@@ -474,6 +501,7 @@ int main(int argc, char** argv) {
               << std::endl;
     std::cout << "Profile       : " << name << std::endl;
     std::cout << "Controller    : Simulation" << std::endl;
+    std::cout << "BusMode       : " << bus_mode << std::endl;
     std::cout << "Cycle         : " << cycle_hz << " Hz" << std::endl;
     std::cout << "Dof           : " << limits.size() << std::endl;
     std::cout << "Cia402Slaves  : " << drives.size() << std::endl;

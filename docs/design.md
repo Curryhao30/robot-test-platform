@@ -122,7 +122,14 @@ OperationEnabled，含 QuickStop/Fault 分支）+ 显式迁移表：
 位语义：statusword bit0=ready / bit1=switched on / bit2=operation enabled /
 bit3=fault / bit6=switch on disabled。非法迁移拒绝并保留原状态。
 
-### 4.3 虚拟 EtherCAT 总线（simulator/，P1-2/3/5）
+### 4.3 EtherCAT 主站抽象（simulator/，P1-2/3/5 + P2.1a）
+- `EthercatMaster`（ethercat_master.hpp）：exchange / run_cycles / 故障注入 /
+  mode 虚接口——gRPC EthercatService 与用例只依赖本抽象；
+- `VirtualEthercatBus`（仿真实现，P1-2/3/5）与 `SoemEthercatBus`（真机骨架，
+  P2.1a：参数校验 + Linux 网卡探测 + Windows 明确不支持）各自实现，
+  `main.cpp --bus virtual|soem` 一行切换；SOEM 从站扫描留待 P2.1b；
+- 未连接时 exchange 返回清晰错误，不挂死、不冒充真机已连接。
+
 - `VirtualEthercatBus`：主站侧周期 PDO 交换（写 controlword/0x607A → 读 statusword/
   0x6064/状态名）；`run_cycles` 真实计时 + 自旋等待（避开 sleep 粒度污染 jitter）；
 - 故障注入语义（对齐真实 EtherCAT）：
@@ -189,8 +196,8 @@ huayan_elfin_pro_public 可基于公开规格建立）。
 --profile ... --port <候选端口>`，等待 gRPC 就绪；示教器测试额外拉起 uvicorn 子进程
 （端口 58081-58083）+ Playwright；会话结束自动生成报告。
 
-用例矩阵见 README.md「测试矩阵」。当前共 **54 项**：
-P0 10 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6。
+用例矩阵见 README.md「测试矩阵」。当前共 **57 项**：
+P0 10 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 骨架 3。
 
 关键测试设计点：
 - **实时性断言**（P1-3）：500Hz（周期 2000us）与 1000Hz 下 overrun==0 且
@@ -244,6 +251,7 @@ P0 10 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapt
 | v0.7.0-p1 | 逐周期波形可视化 | 2026-09-22 |
 | v0.8.0-p2-plan | P2 规划基线 | 2026-09-22 |
 | v0.9.0-p2.0 | Robot Adapter 抽象（simulation/hil 切换） | 2026-09-23 |
+| v0.10.0-p2.1a | EthercatMaster 抽象 + SOEM 骨架（--bus 切换） | 2026-09-23 |
 
 ## 10. 后续演进（P2 / 管理侧）
 

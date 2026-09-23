@@ -163,6 +163,16 @@ Playwright 端到端 8 用例：五块布局、tab 切换、**Servo ON 真实使
 - conftest 按 adapter 类型选择：simulation 拉起 C++ Agent 并包装为
   GrpcAdapter；hil 直连真机盒子——**48 项 P0/P1 用例零改动切换**。
 
+### P2.1a SOEM EtherCAT 主站骨架（3 项）—— `tests/test_p2_soem.py`
+
+`EthercatMaster` 抽象（simulator/include/robottest/ethercat_master.hpp）：
+`exchange` / `run_cycles` / `inject_fault` / `mode` 虚接口，
+`VirtualEthercatBus`（仿真）与 `SoemEthercatBus`（真机骨架）各自实现，
+`main.cpp` 以 `--bus virtual|soem` 切换（`--iface`/`--slaves` 参数）。
+SOEM 骨架：参数校验 + Linux raw socket 网卡探测 + Windows 明确不支持；
+未连接时 exchange 返回清晰错误，不挂死、不冒充真机已连接。
+用例：网卡缺失 FATAL 退出含原因 / 失败日志含可操作提示 / 非法 --bus 拒绝。
+
 ### P1-6 波形可视化（2 项）—— `tests/test_waveform.py`
 
 `RunCycles` 逐周期数据 → 零依赖 SVG 波形（`reports/waveforms/jitter_*.svg` /
@@ -192,6 +202,7 @@ Playwright 端到端 8 用例：五块布局、tab 切换、**Servo ON 真实使
 | v0.7.0-p1 | 逐周期波形可视化（SVG） | ✅ |
 | v0.8.0-p2-plan | P2 规划基线（Adapter/HIL/FSoE/示教器） | ✅ |
 | v0.9.0-p2.0 | **Robot Adapter 抽象**：simulation/hil 配置切换，用例零改动 | ✅ |
+| v0.10.0-p2.1a | **EthercatMaster 抽象 + SOEM 骨架**：--bus 切换，无网卡/非 Linux 清晰 FATAL | ✅ |
 
 ## 后续阶段（未实现）
 

@@ -218,11 +218,13 @@ class ControllerClient:
 
 def spawn_agent(profile_path: str, port: int = 50051,
                 exe: str | None = None,
-                log_file: str | None = None) -> subprocess.Popen:
+                log_file: str | None = None,
+                extra_args: list[str] | None = None) -> subprocess.Popen:
     """拉起 C++ Controller Agent 子进程（供 pytest 使用）。
 
     exe 解析顺序：显式参数 > 环境变量 RTP_AGENT_BIN > 常见构建输出路径。
     log_file 提供时 stdout/stderr 写入文件，避免 PIPE 缓冲填满阻塞 agent 线程。
+    extra_args 附加到命令行尾部（如 --bus soem --iface eth0，P2.1a）。
     """
     repo = pathlib.Path(__file__).resolve().parents[2]
     candidates: list[str] = []
@@ -246,10 +248,10 @@ def spawn_agent(profile_path: str, port: int = 50051,
             + " | ".join(candidates)
         )
     log_stream = open(log_file, "wb") if log_file else subprocess.PIPE
-    return subprocess.Popen(
-        [exe_path, "--profile", profile_path, "--port", str(port)],
-        stdout=log_stream, stderr=subprocess.STDOUT,
-    )
+    cmd = [exe_path, "--profile", profile_path, "--port", str(port)]
+    if extra_args:
+        cmd += extra_args
+    return subprocess.Popen(cmd, stdout=log_stream, stderr=subprocess.STDOUT)
 
 
 def os_environ(key: str) -> str:
