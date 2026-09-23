@@ -173,6 +173,16 @@ SOEM 骨架：参数校验 + Linux raw socket 网卡探测 + Windows 明确不�
 未连接时 exchange 返回清晰错误，不挂死、不冒充真机已连接。
 用例：网卡缺失 FATAL 退出含原因 / 失败日志含可操作提示 / 非法 --bus 拒绝。
 
+### P2.3 示教器协议模拟器（9 项）—— `tests/test_tp_protocol.py`
+
+TP/1.0 行分隔 JSON 帧协议（自研仿真协议，非华沿私有协议）：
+`teach_pendant/protocol.py` 编解码（坏帧拒绝、粘包/半包重组）→
+`tp_bridge.py` TCP 协议桥（TP 帧 ↔ RobotAdapter）→
+`tp_simulator.py` 协议客户端模拟器（CLI 可独立跑 jog_demo 脚本）。
+协议线真实改变控制器状态（SERVO/JOG/STOP 同 UI 用例语义），双客户端
+（浏览器 UI / 协议模拟器）共享控制器契约；未知动词拒绝、控制器错误透传、
+STATE 推送帧。真示教器接入 = 厂商报文 → 本契约（RealTPBridge，待厂商资料）。
+
 ### P2.2a 安全联锁仿真（7 项）—— `tests/test_safety.py`
 
 `SafetyStateMachine`（simulator/）：安全输入（急停/安全门/抱闸/驱动器故障）→
@@ -214,6 +224,7 @@ SOEM 骨架：参数校验 + Linux raw socket 网卡探测 + Windows 明确不�
 | v0.9.0-p2.0 | **Robot Adapter 抽象**：simulation/hil 配置切换，用例零改动 | ✅ |
 | v0.10.0-p2.1a | **EthercatMaster 抽象 + SOEM 骨架**：--bus 切换，无网卡/非 Linux 清晰 FATAL | ✅ |
 | v0.11.0-p2.2a | **SafetyService 安全联锁仿真**：ESTOP>门>驱动器故障联锁 + 控制器联动 | ✅ |
+| v0.12.0-p2.3 | **示教器协议模拟器**：TP/1.0 协议桥 + 协议客户端，UI/REST 之外的第二条示教器线 | ✅ |
 
 ## 后续阶段（未实现）
 

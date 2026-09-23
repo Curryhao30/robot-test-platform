@@ -122,6 +122,15 @@ OperationEnabled，含 QuickStop/Fault 分支）+ 显式迁移表：
 位语义：statusword bit0=ready / bit1=switched on / bit2=operation enabled /
 bit3=fault / bit6=switch on disabled。非法迁移拒绝并保留原状态。
 
+### 4.3 示教器协议模拟器（teach_pendant/，P2.3）
+- TP/1.0 行分隔 JSON 帧协议（自研仿真协议，非华沿私有）：protocol.py 编解码
+  （坏帧拒绝 + FrameStream 粘包/半包重组）；
+- tp_bridge.py：TCP 协议桥（TP 帧 ↔ RobotAdapter），SERVO/JOG/STOP/STATE/
+  RESET/HOME/QUIT；错误透传、未知动词拒绝、STATE 周期推送；
+- tp_simulator.py：协议客户端模拟器（CLI `--script jog_demo`）；
+- 双客户端（浏览器 UI / 协议模拟器）共享控制器契约；真示教器接入 =
+  厂商报文 → 本契约（RealTPBridge，待厂商资料）。
+
 ### 4.3 安全联锁仿真（simulator/，P2.2a）
 - `SafetyStateMachine`：输入 ESTOP/门/抱闸/驱动器故障 → 输出 允许使能/停机/抱闸；
   优先级 ESTOP > 门 > 驱动器故障；抱闸未释放 → 禁止使能（防坠落）；
@@ -204,8 +213,8 @@ huayan_elfin_pro_public 可基于公开规格建立）。
 --profile ... --port <候选端口>`，等待 gRPC 就绪；示教器测试额外拉起 uvicorn 子进程
 （端口 58081-58083）+ Playwright；会话结束自动生成报告。
 
-用例矩阵见 README.md「测试矩阵」。当前共 **65 项**：
-P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 骨架 3 + 安全联锁 7。
+用例矩阵见 README.md「测试矩阵」。当前共 **74 项**：
+P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 骨架 3 + 安全联锁 7 + TP 协议 9。
 
 关键测试设计点：
 - **实时性断言**（P1-3）：500Hz（周期 2000us）与 1000Hz 下 overrun==0 且
@@ -261,6 +270,7 @@ P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapt
 | v0.9.0-p2.0 | Robot Adapter 抽象（simulation/hil 切换） | 2026-09-23 |
 | v0.10.0-p2.1a | EthercatMaster 抽象 + SOEM 骨架（--bus 切换） | 2026-09-23 |
 | v0.11.0-p2.2a | SafetyService 安全联锁仿真（ESTOP>门>驱动器故障 + 控制器联动） | 2026-09-23 |
+| v0.12.0-p2.3 | 示教器协议模拟器（TP/1.0 协议桥 + 协议客户端，9 用例） | 2026-09-23 |
 
 ## 10. 后续演进（P2 / 管理侧）
 
