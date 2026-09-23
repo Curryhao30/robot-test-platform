@@ -104,6 +104,12 @@
     </div>
   </div>
 
+  <div class="panel" id="livePanel" style="display:none">
+    <h2>实时轨迹<span style="font-weight:400;color:var(--mut)">运行中逐用例采样 · SSE 流式 · 边跑边刷新</span></h2>
+    <div class="liveSvg"></div>
+    <div class="note" id="liveNote">等待运行数据…</div>
+  </div>
+
   <div class="panel">
     <h2>实时性波形（最近会话）<span style="font-weight:400;color:var(--mut)">jitter 周期间隔 vs 名义周期 · latency 超标红线</span></h2>
     <div style="display:flex;gap:12px;flex-wrap:wrap">
@@ -118,6 +124,11 @@
 (function () {
   var $ = function (id) { return document.getElementById(id); };
   var pollTimer = null;
+  // ---- 实时轨迹（SSE 流式，运行中边跑边刷新）----
+  var liveES = null;
+  var liveX = [];           // 累计时间 ms（段间延续）
+  var liveQ = [];           // 7 轴关节角（逐段 append）
+  var liveSegs = 0;
 
   function toast(msg) {
     var t = $('toast');
@@ -125,6 +136,68 @@
     t.classList.add('show');
     clearTimeout(toast._h);
     toast._h = setTimeout(function () { t.classList.remove('show'); }, 2600);
+  }
+
+  var LIVE_COLORS = ['#38bdf8', '#f472b6', '#a78bfa', '#fbbf24', '#34d399', '#f87171', '#60a5fa'];
+  function ensureLive() {
+    if (liveES) return;
+    $('livePanel').style.display = 'block';
+    $('liveNote').textContent = '连接实时流…';
+    var es = new EventSource('/api/runs/active/stream');
+    es.onopen = function () { $('liveNote').textContent = '实时流已连接 · 已接收 ' + liveSegs + ' 段'; };
+    es.onmessage = function (ev) {
+      var seg;
+      try { seg = JSON.parse(ev.data); } catch (e) { return; }
+      if (!seg || !seg.q || !seg.t_ms) return;
+      var dof = seg.q.length;
+      while (liveQ.length < dof) liveQ.push([]);
+      var base = liveX.length ? liveX[liveX.length - 1] : 0;
+      for (var i = 0; i < seg.t_ms.length; i++) {
+        liveX.push(base + seg.t_ms[i]);
+        for (var a = 0; a < dof; a++) liveQ[a].push(seg.q[i][a]);
+      }
+      liveSegs++;
+      $('liveNote').textContent = '运行中 · 已接收 ' + liveSegs + ' 段 · ' + liveX.length + ' 采样点 · 最近: ' + (seg.case || '-');
+      try { drawLive(); } catch (e) {
+        document.querySelector('.liveSvg').innerHTML = '<div class="empty">曲线渲染失败：' + esc(e.message || e) + '</div>';
+      }
+    };
+    es.onerror = function () {
+      if (es.readyState === EventSource.CLOSED) stopLive(true);
+    };
+    liveES = es;
+  }
+  function stopLive(final) {
+    if (liveES) { liveES.close(); liveES = null; }
+    if (final && liveSegs) {
+      $('liveNote').textContent = '运行结束 · 本会话共接收 ' + liveSegs + ' 段轨迹（可点开运行历史回看完整曲线）';
+    }
+  }
+  function drawLive() {
+    var box = document.querySelector('.liveSvg');
+    if (!box || !liveX.length) return;
+    var W = 780, H = 200, padL = 46, padR = 10, padT = 14, padB = 22;
+    var lo = Infinity, hi = -Infinity;
+    liveQ.forEach(function (a) { a.forEach(function (v) { if (v < lo) lo = v; if (v > hi) hi = v; }); });
+    if (!isFinite(lo) || !isFinite(hi) || lo === hi) { lo = -1; hi = 1; }
+    var n = Math.max(liveX.length - 1, 1);
+    var x = function (i) { return padL + (i / n) * (W - padL - padR); };
+    var y = function (v) { return padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB); };
+    var h = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block">';
+    for (var g = 0; g <= 4; g++) {
+      var vy = lo + (hi - lo) * g / 4;
+      h += '<line x1="' + padL + '" y1="' + y(vy) + '" x2="' + (W - padR) + '" y2="' + y(vy) + '" stroke="#26334d" stroke-width="1"/>';
+      h += '<text x="' + (padL - 6) + '" y="' + (y(vy) + 4) + '" text-anchor="end" font-size="10" fill="#94a3b8">' + vy.toFixed(Math.abs(vy) < 100 ? 1 : 0) + '</text>';
+    }
+    h += '<text x="' + (W / 2) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="10" fill="#94a3b8">运行累计 t / ms</text>';
+    liveQ.forEach(function (a, idx) {
+      var pts = [];
+      for (var i = 0; i < a.length; i++) pts.push(x(i).toFixed(1) + ',' + y(a[i]).toFixed(1));
+      h += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + LIVE_COLORS[idx] + '" stroke-width="1.5"/>';
+    });
+    for (var j = 0; j < Math.min(liveQ.length, 7); j++) h += '<text x="' + (padL + 6 + j * 24) + '" y="' + (padT - 2) + '" font-size="9" fill="' + LIVE_COLORS[j] + '">J' + (j + 1) + '</text>';
+    h += '</svg>';
+    box.innerHTML = h;
   }
 
   function refresh() {
@@ -176,11 +249,13 @@
           $('runBtn').disabled = true;
           b.textContent = '运行中… ' + s.selector;
           b.className = 'badge run';
+          ensureLive();
           if (!pollTimer) {
             pollTimer = setInterval(function () {
               fetch('/api/runs/status').then(function (r) { return r.json(); }).then(function (s2) {
                 if (!s2.running) {
                   clearInterval(pollTimer); pollTimer = null;
+                  stopLive(true);
                   toast('运行完成');
                   refresh();
                 }

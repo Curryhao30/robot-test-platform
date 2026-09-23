@@ -298,3 +298,62 @@ def test_console_waveforms_svg_endpoint(console_env, monkeypatch):
     assert client.get("/api/waveforms/nope.svg").status_code == 404
     # 路径穿越防护
     assert client.get("/api/waveforms/..%2Fsecret.svg").status_code in (400, 404)
+
+
+# ---------------------------------------------------------------------------
+# 实时曲线（运行中 SSE 流式推送）：_active_stream_gen 生成器语义测试
+# ---------------------------------------------------------------------------
+def _seg(case: str, n: int = 6) -> str:
+    import json
+    return json.dumps({"case": case, "n": n,
+                       "t_ms": [0.0, 10.0, 20.0, 30.0, 40.0, 50.0],
+                       "q": [[float(i)] * n for i in range(7)]}, ensure_ascii=False)
+
+
+def test_active_stream_pushes_segments_then_ends(tmp_path):
+    """运行中增量推送新段；运行结束（is_active=False）后流收尾。"""
+    live = tmp_path / "active.live.jsonl"
+    with live.open("a", encoding="utf-8") as f:
+        f.write(_seg("test_a") + "\n")
+        f.write(_seg("test_b") + "\n")
+    active = {"v": True}
+    gen = console._active_stream_gen(live, lambda: active["v"])
+
+    ev = []
+    for _ in range(2):                       # 已有两段先推
+        ev.append(next(gen))
+    assert "test_a" in ev[0] and "test_b" in ev[1]
+
+    with live.open("a", encoding="utf-8") as f:   # 运行中追加新段
+        f.write(_seg("test_c") + "\n")
+    ev.append(next(gen))
+    assert "test_c" in ev[-1]
+
+    active["v"] = False                       # 运行结束 → 流收尾
+    with pytest.raises(StopIteration):
+        next(gen)
+
+
+def test_active_stream_no_data_ends_when_inactive(tmp_path):
+    """无数据（live 文件未创建）且无运行 → 流尽快结束，不无限等待。"""
+    live = tmp_path / "nope.jsonl"
+    active = {"v": False}
+    gen = console._active_stream_gen(live, lambda: active["v"])
+    with pytest.raises(StopIteration):
+        next(gen)
+
+
+def test_active_stream_http_event_stream(console_env, monkeypatch):
+    """HTTP 层：SSE 端点返回 event-stream，完整响应含各段 data 事件。"""
+    live = console_env / "active.live.jsonl"
+    with live.open("a", encoding="utf-8") as f:
+        f.write(_seg("test_a") + "\n")
+        f.write(_seg("test_b") + "\n")
+    monkeypatch.setattr(console, "LIVE_ACTIVE", live)
+    monkeypatch.setattr(console, "_ACTIVE_RUN", None)   # 无运行 → 推送完即收尾
+
+    r = client.get("/api/runs/active/stream")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("text/event-stream")
+    assert r.text.count("data: {") == 2
+    assert "test_a" in r.text and "test_b" in r.text

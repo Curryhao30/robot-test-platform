@@ -4,3 +4,4 @@ from __future__ import annotations
 DETAILS: dict[str, str] = {}
 TRAJECTORY = None  # (t_ns, q, dq, ddq)，由精度用例写入
 WAVEFORMS: list[dict] = []  # 逐周期 jitter/latency 数据，由 test_waveform 写入，write_run 落盘
+TRAJECTORY_SEGMENTS: list[dict] = []  # 逐用例轨迹段（实时曲线 SSE 数据源），conftest 每用例后 flush

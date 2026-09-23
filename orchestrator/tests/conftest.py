@@ -18,12 +18,12 @@ ORCH = REPO / "orchestrator"
 sys.path.insert(0, str(ORCH))
 
 from app.adapters import adapter_config, connect_hil, make_grpc_adapter  # noqa: E402
-from app.client import ControllerClient, spawn_agent  # noqa: E402
+from app.client import ControllerClient, Trajectory, spawn_agent  # noqa: E402
+from tests import capture  # noqa: E402
 from app.profile import RobotProfile  # noqa: E402
 from app.report import RunContext, next_run_dir, write_run  # noqa: E402
-from tests import capture  # noqa: E402
-
 MAX_SPAWN_ATTEMPTS = 5
+LIVE_ACTIVE = REPO / "reports" / "active.live.jsonl"  # 实时曲线：运行中逐用例轨迹段（SSE 数据源）
 
 # 候选固定端口：避开常见占用区间；Windows Hyper-V 排除范围 / CI 偶发占用
 # 都可能使单个端口绑定失败（gRPC AddListeningPort 返回 0 且不抛异常），
@@ -36,6 +36,86 @@ def _pick_candidate_port(attempt: int) -> int:
 
 
 PORT = _pick_candidate_port(0)
+
+# ---------------------------------------------------------------------------
+# 实时轨迹段（运行中 SSE 曲线数据源）
+# adapter 每次运动指令成功后自动捕获一段（抽稀 <=200 点），每用例结束后
+# flush 到 reports/active.live.jsonl（控制台 SSE 边跑边推），运行结束归档到
+# run_dir/active.jsonl 并删除 live 文件（作为 SSE 结束信号）。
+# ---------------------------------------------------------------------------
+_SEG_MAX_POINTS = 200
+
+
+def _capture_segment(result, case_name: str) -> None:
+    """运动指令结果（gRPC 批量采样）→ 抽稀轨迹段，追加到捕获列表。"""
+    if result is None or not getattr(result, "samples", None):
+        return
+    try:
+        tr = Trajectory.from_result(result)
+        n = tr.q.shape[1]
+        if n < 2:
+            return
+        step = max(1, n // _SEG_MAX_POINTS)
+        idx = list(range(0, n, step))
+        t0 = float(tr.t_ns[0])  # 段内相对时间：前端按段累计成运行时间轴
+        seg = {
+            "case": case_name,
+            "n": n,
+            "t_ms": [(float(tr.t_ns[i]) - t0) / 1e6 for i in idx],
+            "q": [[float(tr.q[a, i]) for a in range(tr.q.shape[0])] for i in idx],
+        }
+        capture.TRAJECTORY_SEGMENTS.append(seg)
+    except Exception:  # noqa: BLE001 捕获失败不影响用例本身
+        pass
+
+
+def _wrap_adapter(inner):
+    """包装 adapter：运动指令成功后自动捕获轨迹段（对用例零侵入）。"""
+    class _Wrap:
+        def __getattr__(self, name):
+            return getattr(inner, name)
+
+        def move_absolute(self, *a, **k):
+            r = inner.move_absolute(*a, **k)
+            _capture_segment(r, "move_absolute")
+            return r
+
+        def move_relative(self, *a, **k):
+            r = inner.move_relative(*a, **k)
+            _capture_segment(r, "move_relative")
+            return r
+
+        def home(self, *a, **k):
+            r = inner.home(*a, **k)
+            _capture_segment(r, "home")
+            return r
+    return _Wrap()
+
+
+def _flush_active_segments(case_name: str) -> None:
+    """把捕获列表中的段追加到 live 文件（段内 case 统一为当前用例名）。"""
+    if not capture.TRAJECTORY_SEGMENTS or _run_dir is None:
+        return
+    LIVE_ACTIVE.parent.mkdir(parents=True, exist_ok=True)
+    with LIVE_ACTIVE.open("a", encoding="utf-8") as f:
+        for seg in capture.TRAJECTORY_SEGMENTS:
+            seg["case"] = case_name
+            f.write(__import__("json").dumps(seg, ensure_ascii=False) + "\n")
+    capture.TRAJECTORY_SEGMENTS.clear()
+
+
+def _archive_active(run_dir: pathlib.Path) -> None:
+    """运行结束：live 文件归档到 run_dir/active.jsonl（历史回放）并删除 live。"""
+    if LIVE_ACTIVE.is_file():
+        try:
+            (run_dir / "active.jsonl").write_bytes(LIVE_ACTIVE.read_bytes())
+        except OSError:
+            pass
+        try:
+            LIVE_ACTIVE.unlink()
+        except OSError:
+            pass
+
 
 _context: RunContext | None = None
 _run_dir: pathlib.Path | None = None
@@ -119,7 +199,7 @@ def client(profile) -> "RobotAdapter":
             adp = connect_hil(profile)
         except RuntimeError as e:
             pytest.fail(f"HIL 连接失败: {e}")
-        yield adp
+        yield _wrap_adapter(adp)
         adp.close()
         return
 
@@ -130,7 +210,7 @@ def client(profile) -> "RobotAdapter":
         proc, c, err = _try_spawn(profile.source_path, log_path, attempt)
         if proc is not None:
             _agent_proc = proc
-            yield make_grpc_adapter(c, profile)
+            yield _wrap_adapter(make_grpc_adapter(c, profile))
             c.close()
             if proc.poll() is None:
                 proc.terminate()
@@ -168,6 +248,7 @@ def _run_context(profile):
     # 每个会话（run）重置共享状态，避免跨 run 污染轨迹/波形
     capture.TRAJECTORY = None
     capture.WAVEFORMS = []
+    capture.TRAJECTORY_SEGMENTS = []
     if os.environ.get("RTP_WRITE_REPORT") == "1":
         _run_dir = next_run_dir(REPO / "reports")
     else:
@@ -176,6 +257,7 @@ def _run_context(profile):
     if _run_dir is not None:
         write_run(_context, _run_dir, trajectory=capture.TRAJECTORY,
                   waveforms=capture.WAVEFORMS)
+        _archive_active(_run_dir)
         print(f"\n[report] {_run_dir}")
 
 
@@ -196,6 +278,7 @@ def pytest_runtest_makereport(item, call):
             detail = (detail + "\n" + str(rep.longrepr).strip()).strip()
         _context.add(name, status, detail=detail,
                      duration_s=getattr(rep, "duration", 0.0))
+        _flush_active_segments(name)
 
 
 # ---------------------------------------------------------------------------

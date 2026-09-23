@@ -22,7 +22,7 @@ import sys
 import time
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -31,6 +31,7 @@ ORCHESTRATOR = REPO / "orchestrator"
 REPORTS = REPO / "reports"
 FRONTEND = REPO / "frontend"
 WAVEFORMS = REPORTS / "waveforms"
+LIVE_ACTIVE = REPORTS / "active.live.jsonl"  # 运行中逐用例轨迹段（SSE 实时曲线数据源）
 
 
 def _defect_state_file() -> pathlib.Path:
@@ -282,6 +283,49 @@ def api_run_trigger(payload: dict | None = None):
         return JSONResponse({"started": False, "error": str(e)}, status_code=400)
 
 
+def _active_stream_gen(live: pathlib.Path, is_active) -> str:
+    """SSE 生成器：推送 live 文件新增行；文件消失且无运行 → 结束。
+
+    - 运行中：每 400ms 读尾部新行，增量推送（data: <json>\n\n）；
+    - 结束判定：连续无新数据且 is_active() 为 False → 断开（前端 EventSource 关闭）。
+    """
+    pos = 0
+    idle = 0
+    while True:
+        if live.is_file():
+            try:
+                with live.open(encoding="utf-8") as f:
+                    f.seek(pos)
+                    new = f.read()
+                    pos = f.tell()
+            except OSError:
+                break
+            if new:
+                idle = 0
+                for line in new.splitlines():
+                    if line.strip():
+                        yield "data: " + line + "\n\n"
+                continue
+        idle += 1
+        if not is_active() and idle > 1:
+            break
+        time.sleep(0.4)
+
+
+@app.get("/api/runs/active/stream")
+def api_active_stream():
+    """SSE 实时曲线：运行过程中逐用例轨迹段边跑边推（示波器语义）。
+
+    前端 EventSource 连接；运行结束（live 文件被清理）→ 流自动结束。
+    数据全部来自 C++ Agent 批量采样后逐用例落盘的 active.live.jsonl。
+    """
+    return StreamingResponse(
+        _active_stream_gen(LIVE_ACTIVE, lambda: _ACTIVE_RUN is not None),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/api/runs/status")
 def api_run_status():
     """后台运行进度；结束后返回最新 run。"""
@@ -299,6 +343,10 @@ def api_run_status():
                 "latest_run": latest,
             }
         _ACTIVE_RUN = None
+        try:
+            LIVE_ACTIVE.unlink()  # 运行结束：清理实时流（SSE 据此收尾）
+        except OSError:
+            pass
     runs = _iter_runs()
     if runs:
         latest = _run_view(runs[0])
