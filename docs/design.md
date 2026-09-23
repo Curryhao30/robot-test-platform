@@ -213,8 +213,8 @@ huayan_elfin_pro_public 可基于公开规格建立）。
 --profile ... --port <候选端口>`，等待 gRPC 就绪；示教器测试额外拉起 uvicorn 子进程
 （端口 58081-58083）+ Playwright；会话结束自动生成报告。
 
-用例矩阵见 README.md「测试矩阵」。当前共 **86 项**：
-P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 骨架 3 + 安全联锁 7 + TP 协议 9 + Console 12。
+用例矩阵见 README.md「测试矩阵」。当前共 **91 项**：
+P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapter 6 + SOEM 骨架 3 + 安全联锁 7 + TP 协议 9 + Console 12 + Qt 面板 5。
 
 关键测试设计点：
 - **实时性断言**（P1-3）：500Hz（周期 2000us）与 1000Hz 下 overrun==0 且
@@ -247,7 +247,7 @@ P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapt
 
 ## 8. 验收标准
 
-1. `pytest` 全绿：86 项用例通过（本机 + CI 双端）；
+1. `pytest` 全绿：91 项用例通过（本机 + CI 双端）；
 2. 报告目录生成 result.json / trajectory.csv / report.html / log.txt /
    waveforms/*.svg；
 3. 关键论断可验证：Python 侧无控制周期循环；轨迹与逐周期数据来自 C++ Agent；
@@ -274,6 +274,7 @@ P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapt
 | v0.13.0-p3 | 管理控制台（console 只读 API + 零依赖单页前端；报告写盘 RTP_WRITE_REPORT 门控） | 2026-09-23 |
 | v0.14.0-p3-ops | 可操作控制台（触发运行/分组、进度轮询、运行明细、缺陷人工关闭·重开） | 2026-09-23 |
 | v0.15.0-p3-charts | 运行数据曲线（7 轴轨迹位置/速度/加速度 + 逐周期 jitter/latency 波形 + 全局波形面板） | 2026-09-23 |
+| v0.14.2-teach-pendant-qt-tests | 示教器 Qt 面板测试补全（MockBackend 抽离独立模块 + 5 项契约测试） | 2026-09-23 |
 
 ## 10. 后续演进（P2 / 管理侧）
 
@@ -281,6 +282,10 @@ P0 11 + CiA402 12 + EtherCAT 7 + 示教器 8 + 总线故障 6 + 波形 2 + Adapt
   真实示教器/机器人；FSoE/Safety I/O 联锁（安全逻辑与状态联锁仿真 → HIL 阶段
   验证真实 I/O）；
 - 运动学：FK/IK、TCP 轨迹 Oracle、MoveLinear/MoveCircular 路径判定；
+- 示教器桌面侧：v0.14.1-teach-pendant-qt 落地 PyQt5 面板（RestBackend/MockBackend
+  双后端、jog 按住连发、HOME 回零）；v0.14.2-teach-pendant-qt-tests 把
+  MockBackend 抽为独立模块并补 5 项契约测试（无 GUI/agent，QCoreApplication
+  驱动异步回调），消除示教器线最后一个自动化缺口。
 - 管理侧：v0.15.0-p3-charts 落地运行数据曲线——运行明细展开 7 轴轨迹曲线
   （trajectory.csv 抽稀 400 点，位置/速度/加速度切换）与逐周期 jitter/latency
   波形（run 级 waveform.json），另加全局波形面板（reports/waveforms/*.svg）；

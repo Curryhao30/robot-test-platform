@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 
-# Form implementation generated from reading ui file 'C:\Users\jh\测试开发\robot-test-platform\orchestrator\teach_pendant\qt_panel.ui'
+# Form implementation generated from reading ui file 'teach_pendant/qt_panel.ui'
 #
 # Created by: PyQt5 UI code generator 5.15.11
 #
@@ -14,7 +14,8 @@ from PyQt5 import QtCore, QtGui, QtWidgets
 class Ui_QtTeachPendant(object):
     def setupUi(self, QtTeachPendant):
         QtTeachPendant.setObjectName("QtTeachPendant")
-        QtTeachPendant.resize(1000, 820)
+        QtTeachPendant.resize(1120, 880)
+        QtTeachPendant.setMinimumSize(QtCore.QSize(980, 760))
         self.centralwidget = QtWidgets.QWidget(QtTeachPendant)
         self.centralwidget.setObjectName("centralwidget")
         self.rootLayout = QtWidgets.QVBoxLayout(self.centralwidget)
@@ -39,6 +40,11 @@ class Ui_QtTeachPendant(object):
         self.title = QtWidgets.QLabel(self.statusRow)
         self.title.setObjectName("title")
         self.statusLayout.addWidget(self.title)
+        spacerItem = QtWidgets.QSpacerItem(40, 20, QtWidgets.QSizePolicy.Expanding, QtWidgets.QSizePolicy.Minimum)
+        self.statusLayout.addItem(spacerItem)
+        self.lbl_conn = QtWidgets.QLabel(self.statusRow)
+        self.lbl_conn.setObjectName("lbl_conn")
+        self.statusLayout.addWidget(self.lbl_conn)
         self.pendantLayout.addWidget(self.statusRow)
         self.groupJoints = QtWidgets.QGroupBox(self.pagePendant)
         self.groupJoints.setObjectName("groupJoints")
@@ -148,6 +154,16 @@ class Ui_QtTeachPendant(object):
         self.btn_home = QtWidgets.QPushButton(self.groupCmd)
         self.btn_home.setObjectName("btn_home")
         self.cmdLayout.addWidget(self.btn_home)
+        self.lbl_step = QtWidgets.QLabel(self.groupCmd)
+        self.lbl_step.setObjectName("lbl_step")
+        self.cmdLayout.addWidget(self.lbl_step)
+        self.cmb_step = QtWidgets.QComboBox(self.groupCmd)
+        self.cmb_step.setObjectName("cmb_step")
+        self.cmb_step.addItem("")
+        self.cmb_step.addItem("")
+        self.cmb_step.addItem("")
+        self.cmb_step.addItem("")
+        self.cmdLayout.addWidget(self.cmb_step)
         self.pendantLayout.addWidget(self.groupCmd)
         self.groupAbs = QtWidgets.QGroupBox(self.pagePendant)
         self.groupAbs.setObjectName("groupAbs")
@@ -195,6 +211,9 @@ class Ui_QtTeachPendant(object):
         self.ainp_6 = QtWidgets.QLineEdit(self.groupAbs)
         self.ainp_6.setObjectName("ainp_6")
         self.absLayout.addWidget(self.ainp_6)
+        self.btn_read_cur = QtWidgets.QPushButton(self.groupAbs)
+        self.btn_read_cur.setObjectName("btn_read_cur")
+        self.absLayout.addWidget(self.btn_read_cur)
         self.btn_move = QtWidgets.QPushButton(self.groupAbs)
         self.btn_move.setObjectName("btn_move")
         self.absLayout.addWidget(self.btn_move)
@@ -204,6 +223,7 @@ class Ui_QtTeachPendant(object):
         self.alarmLayout = QtWidgets.QVBoxLayout(self.groupAlarm)
         self.alarmLayout.setObjectName("alarmLayout")
         self.alarm_label = QtWidgets.QLabel(self.groupAlarm)
+        self.alarm_label.setWordWrap(True)
         self.alarm_label.setObjectName("alarm_label")
         self.alarmLayout.addWidget(self.alarm_label)
         self.pendantLayout.addWidget(self.groupAlarm)
@@ -231,12 +251,14 @@ class Ui_QtTeachPendant(object):
 
         self.retranslateUi(QtTeachPendant)
         self.tabWidget.setCurrentIndex(0)
+        self.cmb_step.setCurrentIndex(2)
         QtCore.QMetaObject.connectSlotsByName(QtTeachPendant)
 
     def retranslateUi(self, QtTeachPendant):
         _translate = QtCore.QCoreApplication.translate
         QtTeachPendant.setWindowTitle(_translate("QtTeachPendant", "Robot Teach Pendant · PyQt5 HMI"))
         self.title.setText(_translate("QtTeachPendant", "示教器（未连接）"))
+        self.lbl_conn.setText(_translate("QtTeachPendant", "—"))
         self.groupJoints.setTitle(_translate("QtTeachPendant", "关节角度 (deg)"))
         self.jlbl_0.setText(_translate("QtTeachPendant", "J0"))
         self.jval_0.setText(_translate("QtTeachPendant", "0.0"))
@@ -272,6 +294,11 @@ class Ui_QtTeachPendant(object):
         self.btn_stop.setText(_translate("QtTeachPendant", "Stop"))
         self.btn_reset.setText(_translate("QtTeachPendant", "Reset"))
         self.btn_home.setText(_translate("QtTeachPendant", "Home"))
+        self.lbl_step.setText(_translate("QtTeachPendant", "步长(deg)"))
+        self.cmb_step.setItemText(0, _translate("QtTeachPendant", "0.1"))
+        self.cmb_step.setItemText(1, _translate("QtTeachPendant", "1"))
+        self.cmb_step.setItemText(2, _translate("QtTeachPendant", "5"))
+        self.cmb_step.setItemText(3, _translate("QtTeachPendant", "10"))
         self.groupAbs.setTitle(_translate("QtTeachPendant", "Move Absolute"))
         self.albl_0.setText(_translate("QtTeachPendant", "J0"))
         self.ainp_0.setText(_translate("QtTeachPendant", "0.0"))
@@ -287,6 +314,7 @@ class Ui_QtTeachPendant(object):
         self.ainp_5.setText(_translate("QtTeachPendant", "0.0"))
         self.albl_6.setText(_translate("QtTeachPendant", "J6"))
         self.ainp_6.setText(_translate("QtTeachPendant", "0.0"))
+        self.btn_read_cur.setText(_translate("QtTeachPendant", "读取当前"))
         self.btn_move.setText(_translate("QtTeachPendant", "Move"))
         self.groupAlarm.setTitle(_translate("QtTeachPendant", "Alarm"))
         self.alarm_label.setText(_translate("QtTeachPendant", "—"))

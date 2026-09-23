@@ -3,7 +3,10 @@
  <class>QtTeachPendant</class>
  <widget class="QMainWindow" name="QtTeachPendant">
   <property name="geometry">
-   <rect><x>0</x><y>0</y><width>1000</width><height>820</height></rect>
+   <rect><x>0</x><y>0</y><width>1120</width><height>880</height></rect>
+  </property>
+  <property name="minimumSize">
+   <size><width>980</width><height>760</height></size>
   </property>
   <property name="windowTitle">
    <string>Robot Teach Pendant · PyQt5 HMI</string>
@@ -32,6 +35,21 @@
            <item>
             <widget class="QLabel" name="title">
              <property name="text"><string>示教器（未连接）</string></property>
+            </widget>
+           </item>
+           <item>
+            <spacer name="statusSpacer">
+             <property name="orientation">
+              <enum>Qt::Horizontal</enum>
+             </property>
+             <property name="sizeHint" stdset="0">
+              <size><width>40</width><height>20</height></size>
+             </property>
+            </spacer>
+           </item>
+           <item>
+            <widget class="QLabel" name="lbl_conn">
+             <property name="text"><string>—</string></property>
             </widget>
            </item>
           </layout>
@@ -81,6 +99,16 @@
            <item><widget class="QPushButton" name="btn_stop"><property name="text"><string>Stop</string></property></widget></item>
            <item><widget class="QPushButton" name="btn_reset"><property name="text"><string>Reset</string></property></widget></item>
            <item><widget class="QPushButton" name="btn_home"><property name="text"><string>Home</string></property></widget></item>
+           <item><widget class="QLabel" name="lbl_step"><property name="text"><string>步长(deg)</string></property></widget></item>
+           <item>
+            <widget class="QComboBox" name="cmb_step">
+             <property name="currentIndex"><number>2</number></property>
+             <item><property name="text"><string>0.1</string></property></item>
+             <item><property name="text"><string>1</string></property></item>
+             <item><property name="text"><string>5</string></property></item>
+             <item><property name="text"><string>10</string></property></item>
+            </widget>
+           </item>
           </layout>
          </widget>
         </item>
@@ -102,6 +130,7 @@
            <item><widget class="QLineEdit" name="ainp_5"><property name="text"><string>0.0</string></property></widget></item>
            <item><widget class="QLabel" name="albl_6"><property name="text"><string>J6</string></property></widget></item>
            <item><widget class="QLineEdit" name="ainp_6"><property name="text"><string>0.0</string></property></widget></item>
+           <item><widget class="QPushButton" name="btn_read_cur"><property name="text"><string>读取当前</string></property></widget></item>
            <item><widget class="QPushButton" name="btn_move"><property name="text"><string>Move</string></property></widget></item>
           </layout>
          </widget>
@@ -110,7 +139,7 @@
          <widget class="QGroupBox" name="groupAlarm">
           <property name="title"><string>Alarm</string></property>
           <layout class="QVBoxLayout" name="alarmLayout">
-           <item><widget class="QLabel" name="alarm_label"><property name="text"><string>—</string></property></widget></item>
+           <item><widget class="QLabel" name="alarm_label"><property name="text"><string>—</string></property><property name="wordWrap"><bool>true</bool></property></widget></item>
           </layout>
          </widget>
         </item>

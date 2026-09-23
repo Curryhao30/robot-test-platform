@@ -12,3 +12,4 @@ httpx2
 playwright>=1.45
 # 桌面示教器面板（PyQt5 HMI，补齐 QT 缺口；teach_pendant/qt_panel.py）
 PyQt5>=5.15
+PyQtWebEngine>=5.15

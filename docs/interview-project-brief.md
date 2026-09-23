@@ -3,7 +3,7 @@
 **机器人控制器与示教系统自动化验证平台**
 Robot Controller & Teach Pendant Validation Platform
 
-> 数据截至 **v0.15.0-p3-charts（2026-09-23）**，**86 项自动化用例**，Windows 本机 + GitHub Actions 双端全绿。
+> 数据截至 **v0.14.2-teach-pendant-qt-tests / v0.15.0-p3-charts（2026-09-23）**，**91 项自动化用例**，Windows 本机 + GitHub Actions 双端全绿。
 > 仓库：https://github.com/Curryhao30/robot-test-platform（public）
 
 ---
@@ -22,7 +22,7 @@ Robot Controller & Teach Pendant Validation Platform
 >
 > 关键设计有三个：第一，**Python 只下发一次命令，控制周期内的执行和采样全部在 C++ 内完成**，完成后批量回传轨迹和逐周期数据，这样解释器和 RPC 不会影响实时性。第二，**Simulator 负责产生行为，Oracle 负责判定对错**——位置误差、速度钳制、状态机序列合法性都由独立判定层检查。第三，**Robot Profile 参数化**，轴数、限位、限速、控制周期全部走 YAML 配置，换个机型不改测试代码。
 >
-> 目前已经迭代了 15 个版本 tag，86 个用例全绿，覆盖 CiA402 状态机、EtherCAT 虚拟总线、实时性量化（jitter/latency/overrun）、示教器 UI 和协议模拟器、总线异常注入、安全联锁仿真。架构上做了 Robot Adapter 抽象，未来接真机只需要改配置不改用例。
+> 目前已经迭代了 16 个版本 tag，91 个用例全绿，覆盖 CiA402 状态机、EtherCAT 虚拟总线、实时性量化（jitter/latency/overrun）、示教器 Web UI / Qt 桌面面板 / 协议模拟器、总线异常注入、安全联锁仿真。架构上做了 Robot Adapter 抽象，未来接真机只需要改配置不改用例。
 
 ---
 
@@ -42,7 +42,7 @@ Robot Controller & Teach Pendant Validation Platform
 |---|---|---|
 | 负责控制器的软件开发 | C++ Controller Agent（控制环 / PLCopen 状态机 / 采样） | "我实现了控制器的运动执行与状态机，并用测试反向驱动设计" |
 | 负责示教器的软件开发 | 虚拟示教器（五块 UI + REST）+ TP/1.0 示教器协议模拟器 + PyQt5 桌面面板 | "示教器被抽象成客户端，浏览器 UI / 桌面 QT 面板 / 协议模拟器共享同一控制器契约" |
-| 管理软件 BUG，管理并发布软件版本 | CI 全绿 + 15 个版本 tag + 测试→缺陷→回归闭环（用例发现 bug 后补回归用例） | "每个里程碑：本地全量绿 → 推 CI → 绿后打 tag，可追溯" |
+| 管理软件 BUG，管理并发布软件版本 | CI 全绿 + 16 个版本 tag + 测试→缺陷→回归闭环（用例发现 bug 后补回归用例） | "每个里程碑：本地全量绿 → 推 CI → 绿后打 tag，可追溯" |
 | 编写软件设计文档 | docs/design.md、docs/p2-design.md、README 项目说明书 | "设计文档覆盖架构、协议、模块、验收、版本记录" |
 
 ---
@@ -130,7 +130,7 @@ Robot Controller & Teach Pendant Validation Platform
 
 ### 4.6 EtherCAT 主站抽象：Virtual / SOEM 骨架（P1-2/3/5 + P2.1a）
 - **干什么**：`EthercatMaster` 虚接口（exchange/run_cycles/inject_fault/mode），`VirtualEthercatBus`（仿真实现：周期 PDO 交换 + 实时统计 + 故障注入）与 `SoemEthercatBus`（真机骨架：参数校验 + Linux raw socket 网卡探测 + Windows 明确不支持）各自实现；`main.cpp --bus virtual|soem` 一行切换。
-- **面试怎么说**："真机接入点钉死在 EthercatMaster 抽象上——P2.1b 只需在 SoemEthercatBus::init() 里替换成 SOEM 的 ecx_init + 从站扫描，上层 gRPC 和 86 个用例零改动；而且骨架现在就保证无网卡/非 Linux 时报清晰错误，不冒充真机已连接。"
+- **面试怎么说**："真机接入点钉死在 EthercatMaster 抽象上——P2.1b 只需在 SoemEthercatBus::init() 里替换成 SOEM 的 ecx_init + 从站扫描，上层 gRPC 和 91 个用例零改动；而且骨架现在就保证无网卡/非 Linux 时报清晰错误，不冒充真机已连接。"
 
 ### 4.7 实时性量化（P1-3）
 - **干什么**：RunCycles 返回逐周期 `interval_us[]`（周期间隔）与 `processing_us[]`（单周期交换耗时），统计 min/max/mean/std + overrun。
@@ -167,6 +167,19 @@ Robot Controller & Teach Pendant Validation Platform
 ### 4.13 报告与波形（P1-6）
 - 每次 pytest 会话自动生成 `reports/run_YYYYMMDD_NNN/`：report.html / result.json / trajectory.csv / log.txt / waveforms/*.svg（零依赖 SVG，jitter vs 名义周期参考线、latency overrun 红线+超标高亮）。
 
+### 4.13 示教器 Qt 桌面面板与契约测试（P2.3 路径 B 的第三种形态 + 测试补全）
+- **干什么**：`teach_pendant/qt_panel.py` PyQt5 桌面示教器（`.ui` + pyuic + 业务类
+  `QTTeachPendant`），与 Web 示教器共用同一控制器契约；`RestBackend`（REST）/
+  `MockBackend`（离线仿真）双后端，jog 按住连发、HOME 回零、Esc 急停、F11 全屏、
+  "测试与曲线"标签页内嵌管理控制台。`MockBackend` 抽为独立模块
+  `teach_pendant/mock_backend.py`（qt_panel 与测试共用，避免测试引入 QtWebEngine）。
+- **怎么测**：`test_qt_panel.py` 5 项契约测试——使能门禁（未使能 jog/home/move 拒绝）、
+  jog 步长增量（正/负/自定义倍率）、回零全 0、绝对运动整体写入、复位清报警与 alarm
+  派生；用 QCoreApplication.processEvents() 驱动 QTimer 异步回调，**无 GUI / agent**。
+- **面试怎么说**："示教器我做了三种客户端形态：Web、TP 协议桥、Qt 桌面面板；Qt 面板
+  与 Web 共用同一控制器契约，离线仿真后端独立成模块后被直接拿去做契约测试——
+  测的是示教器软件和控制器之间的行为契约，不是按钮点击。"
+
 ### 4.14 管理控制台（P3 → P3-ops → P3-charts：可操作 + 运行数据曲线）
 - **干什么**：`orchestrator/app/console.py` 提供 REST API——只读：`/api/cases` 用例清单（AST 扫描）、`/api/runs` 运行历史、`/api/runs/{id}` 运行明细（含 has_trajectory）、`/api/runs/{id}/trajectory`（7 轴轨迹抽稀采样）、`/api/runs/{id}/waveform`（逐周期 jitter/latency JSON）、`/api/waveforms/{name}`（全局波形 SVG）、`/api/defects` 缺陷视图、`/api/summary` 汇总；操作：`POST /api/runs` 触发后台 pytest（全量或按 11 个分组之一，RTP_WRITE_REPORT=1 落盘新 run）、`GET /api/runs/status` 进度轮询、`POST /api/defects/{id}/close|reopen` 人工闭环。`frontend/index.html` 零依赖单页：运行按钮（分组下拉）、运行中徽章 + 3s 轮询、运行行点击展开逐用例明细 + **7 轴轨迹曲线（位置/速度/加速度切换，trajectory.csv 抽稀 400 点 SVG 折线）** + 逐周期 jitter/latency 波形、实时性波形面板（全局 SVG）、缺陷关闭/重开（MANUAL 标记）。
 - **怎么测**：`test_console.py` 12 项——清单结构、运行历史结构、自动闭环语义、汇总一致性、run 级逐周期波形 JSON、触发运行、运行中状态、分组/未知分组 400、并发 409、运行明细 404、轨迹曲线 API（抽稀结构/404）、波形 SVG 端点（200/404/路径穿越防护）。
@@ -191,7 +204,7 @@ Robot Controller & Teach Pendant Validation Platform
 
 ---
 
-## 5. 测试体系（86 项）
+## 5. 测试体系（91 项）
 
 | 模块 | 用例数 | 文件 | 关键覆盖 |
 |---|---|---|---|
@@ -207,12 +220,13 @@ Robot Controller & Teach Pendant Validation Platform
 | 安全联锁 | 7 | test_safety.py | ESTOP 联动/优先级/门/故障/抱闸/恢复 |
 | 示教器协议模拟器 | 9 | test_tp_protocol.py | 编解码/坏帧/粘包/SERVO/JOG/STOP/错误透传/推送 |
 | 管理控制台 | 12 | test_console.py | 清单/历史/自动闭环/汇总 + 逐周期波形 JSON + 触发运行/状态轮询/并发拒绝/明细/人工闭环 + 轨迹曲线 API/波形 SVG 端点 |
+| Qt 示教器面板 | 5 | test_qt_panel.py | MockBackend 契约：使能门禁 / jog 步长增量 / 回零 / 绝对运动 / 复位与报警派生（无 GUI/agent） |
 
 **设计要点**：实时性断言由逐周期明细重算校验；bus_fault 用例 autouse teardown 复位从站防污染；safety 用例 teardown 清输入 + Reset 防污染共享 agent；波形自洽（max(interval)−jitter_max≈名义周期）。
 
 ---
 
-## 6. 工程化与演进（15 个 tag）
+## 6. 工程化与演进（16 个 tag）
 
 ### 6.1 里程碑时间线
 | tag | 内容 | CI |
@@ -232,8 +246,9 @@ Robot Controller & Teach Pendant Validation Platform
 | v0.13.0-p3 | 管理控制台（console 只读 API + 单页前端 + 报告写盘门控） | ✅ |
 | v0.14.0-p3-ops | 可操作控制台：触发运行/分组、进度轮询、运行明细、缺陷人工关闭·重开 | ✅ |
 | v0.15.0-p3-charts | 运行数据曲线：7 轴轨迹（位置/速度/加速度）+ 逐周期 jitter/latency 波形 + 全局波形面板 | ✅ |
+| v0.14.2-teach-pendant-qt-tests | 示教器 Qt 面板测试补全：MockBackend 抽离独立模块 + 5 项契约测试 | ✅ |
 
-**节奏纪律**（面试重点讲）：每个里程碑 = **本地全量绿 → 推 CI → CI 绿后打 tag**，15 个 tag 全部可追溯。
+**节奏纪律**（面试重点讲）：每个里程碑 = **本地全量绿 → 推 CI → CI 绿后打 tag**，16 个 tag 全部可追溯。
 
 ### 6.2 踩坑与根因（体现工程深度）
 1. **CI 排障链**：Ubuntu apt gRPC≈1.51 已是 fluent API（AddListeningPort 返回 ServerBuilder& + 第 3 参 selected_port，不得用 selected==0 判绑定失败）；Ubuntu 无 Protobuf CMake config → CMake 双轨；pytest agent 未就绪 → timeout + 日志防缓冲 + wait_ready 记 last_err + 候选端口重试；本机 Hyper-V 排除动态端口 → 固定候选端口。
@@ -313,7 +328,7 @@ Robot Controller & Teach Pendant Validation Platform
 > 安全等级（PL/SIL）需要认证资质与真实安全 I/O。我验证的是**控制逻辑的联锁行为**（急停优先级、门 Guard Stop、Fault 复位），仿真层明确标注边界，HIL 阶段才验证真实 I/O。诚实声明边界比夸大安全结论专业得多。
 
 **Q20：这个项目简历上怎么定位？**
-> 一句话：**"机器人控制器与示教系统自动化测试平台｜C++ / Python / Linux / EtherCAT / CiA402 / PLCopen"**——多轴软硬件解耦测试架构、C++ 控制环与 Python 编排双层、Robot Profile 参数化、Simulator+Oracle 判定、CiA402/EtherCAT/示教器/安全联锁自动化验证，86 用例 CI 全绿，15 个版本里程碑。
+> 一句话：**"机器人控制器与示教系统自动化测试平台｜C++ / Python / Linux / EtherCAT / CiA402 / PLCopen"**——多轴软硬件解耦测试架构、C++ 控制环与 Python 编排双层、Robot Profile 参数化、Simulator+Oracle 判定、CiA402/EtherCAT/示教器/安全联锁自动化验证，91 用例 CI 全绿，16 个版本里程碑。
 
 **Q21：后续规划？**
 > P2.1b 真 EtherCAT HIL（SOEM 接入真机，jitter/latency 变真机验收指标）、P2.2b 真实安全 I/O、RealTPBridge 真示教器（需厂商协议资料）；运动学 FK/IK + MoveLin/MoveCirc 路径判定；管理侧 Requirement→TestCase→TestRun→Defect→Build→Release 闭环。
@@ -328,7 +343,7 @@ Robot Controller & Teach Pendant Validation Platform
 > 岗位要控制器软件、示教器软件、版本管理、设计文档——项目四者全覆盖；技术栈 C++/Python/Linux/gRPC 对齐；行业语义（PLCopen/CiA402/EtherCAT/示教器/安全联锁）是本项目的骨架而不是名词堆砌；异常注入与回归闭环直接对应测试开发职责。
 
 **Q25：如果让你真机接一台 Elfin-Pro，第一步做什么？**
-> 先建 `huayan_elfin_pro_public` Profile（公开规格：轴数、周期、限位、精度），用现有 86 用例在 Simulation 模式全量跑通基线；再 P2.1b 把 SOEM 接到真实 EtherCAT 从站（工控机 Linux + 伺服），跑 test_ethercat 核心用例对齐从站数；最后 jitter/latency/overrun 以真机实测进报告。每一步都有明确验收，不改用例只改配置。
+> 先建 `huayan_elfin_pro_public` Profile（公开规格：轴数、周期、限位、精度），用现有 91 用例在 Simulation 模式全量跑通基线；再 P2.1b 把 SOEM 接到真实 EtherCAT 从站（工控机 Linux + 伺服），跑 test_ethercat 核心用例对齐从站数；最后 jitter/latency/overrun 以真机实测进报告。每一步都有明确验收，不改用例只改配置。
 
 ---
 
@@ -352,7 +367,7 @@ Robot Controller & Teach Pendant Validation Platform
 > 机器人控制器与示教系统自动化测试平台｜C++ / Python / Linux / EtherCAT / CiA402 / PLCopen
 
 **简历 300 字版：**
-> 设计多轴机器人控制器软硬件解耦测试架构，开发 C++ Controller Agent（控制环 + PLCopen 状态机）与 Python/Pytest 测试编排引擎，实现 CiA402 驱动状态机、EtherCAT 虚拟总线、Modbus/实时性量化及异常工况自动验证；构建 Robot Profile 参数化多轴仿真与 Test Oracle，对关节位置、速度钳制、状态机序列、控制周期 jitter/latency/overrun 自动判定；实现虚拟示教器（UI + Playwright）与 TP/1.0 示教器协议模拟器、安全联锁仿真（ESTOP>门>驱动器故障 + 控制器联动）；Robot Adapter 抽象支持 Simulation/HIL 一行切换。86 项用例 CI 全绿，15 个版本里程碑，测试→缺陷→回归闭环。
+> 设计多轴机器人控制器软硬件解耦测试架构，开发 C++ Controller Agent（控制环 + PLCopen 状态机）与 Python/Pytest 测试编排引擎，实现 CiA402 驱动状态机、EtherCAT 虚拟总线、Modbus/实时性量化及异常工况自动验证；构建 Robot Profile 参数化多轴仿真与 Test Oracle，对关节位置、速度钳制、状态机序列、控制周期 jitter/latency/overrun 自动判定；实现虚拟示教器（UI + Playwright）与 TP/1.0 示教器协议模拟器、安全联锁仿真（ESTOP>门>驱动器故障 + 控制器联动）；Robot Adapter 抽象支持 Simulation/HIL 一行切换。91 项用例 CI 全绿，16 个版本里程碑，测试→缺陷→回归闭环。
 
 ---
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 
 import yaml
 from fastapi import FastAPI
@@ -45,6 +46,7 @@ class JogRequest(BaseModel):
     joint: int
     direction: int = 1        # +1 / -1
     speed_pct: float = 20.0   # 保留：P0 恒为增量步进
+    step_deg: Optional[float] = None   # 桌面 HMI 倍率（0.1/1/5/10）；缺省用 JOG_STEP_DEG
 
 
 class MoveAbsRequest(BaseModel):
@@ -99,8 +101,9 @@ def jog(req: JogRequest):
     c = _require()
     if not (0 <= req.joint < DOF):
         return {"ok": False, "error_code": 7, "error_message": "joint out of range"}
+    step = req.step_deg if (req.step_deg and req.step_deg > 0) else JOG_STEP_DEG
     delta = [0.0] * DOF
-    delta[req.joint] = JOG_STEP_DEG * (1 if req.direction >= 0 else -1)
+    delta[req.joint] = step * (1 if req.direction >= 0 else -1)
     # 增量步进：先 Stop 清掉可能存在的运动，再执行一次小步；
     # UI 轮询看到位置变化。move_relative 为同步 RPC，返回时已到位。
     c.stop()
