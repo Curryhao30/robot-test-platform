@@ -94,33 +94,45 @@ def _run_view(run: dict) -> dict:
 
 
 def _defects_view(run: dict | None) -> dict:
-    """由最近一次运行的 FAIL 用例派生缺陷；当前全绿 → 0 未闭环。"""
+    """缺陷视图：状态由最新一次运行决定。
+
+    语义（自动派生，非人工录入）：
+    - 最新运行中 FAIL 的用例 → OPEN 缺陷（id 按最新运行 cases 序号派生）；
+    - 历史上 FAIL 过、且最新运行中 PASS 的用例 → CLOSED（回归闭环）；
+    - 其余用例不产生缺陷。
+    """
     if run is None:
         return {"latest_run": None, "open": [], "closed": [], "note": "尚无运行记录"}
     data = run["data"]
     cases = data.get("cases", [])
+    latest_by_name = {c.get("name"): c for c in cases}
+    # 历史失败记录（最新 run 之前所有 run 中出现过的 FAIL 用例名）
+    failed_history: set[str] = set()
+    for older in _iter_runs()[1:]:
+        for c in older["data"].get("cases", []):
+            if c.get("status") != "PASS":
+                failed_history.add(c.get("name", ""))
+
     open_defects = []
+    closed = []
     for i, c in enumerate(cases, 1):
+        name = c.get("name", "")
         if c.get("status") != "PASS":
             open_defects.append({
                 "id": f"BUG-{i:03d}",
-                "case": c.get("name", ""),
+                "case": name,
                 "detail": c.get("detail", "") or "见运行日志",
                 "status": "OPEN",
                 "found_in": run["dir"],
             })
-    closed = []
-    for d in open_defects:
-        # 语义演示：缺陷在后续回归通过后关闭；当前只有最近一次运行，
-        # 未闭环缺陷保持 OPEN；历史 run 中存在同用例 PASS 时视为已闭环。
-        for older in _iter_runs()[1:]:
-            for c in older["data"].get("cases", []):
-                if c.get("name") == d["case"] and c.get("status") == "PASS":
-                    closed.append({**d, "status": "CLOSED", "closed_in": older["dir"]})
-                    break
-            if any(c["case"] == d["case"] for c in closed):
-                break
-    open_defects = [d for d in open_defects if not any(c["case"] == d["case"] for c in closed)]
+        elif name in failed_history:
+            closed.append({
+                "id": f"BUG-{i:03d}",
+                "case": name,
+                "detail": "回归通过",
+                "status": "CLOSED",
+                "closed_in": run["dir"],
+            })
     note = "最近运行全绿，无未闭环缺陷" if not open_defects else f"{len(open_defects)} 个未闭环缺陷"
     return {"latest_run": run["dir"], "open": open_defects, "closed": closed, "note": note}
 
