@@ -3,7 +3,7 @@
  <class>QtTeachPendant</class>
  <widget class="QMainWindow" name="QtTeachPendant">
   <property name="geometry">
-   <rect><x>0</x><y>0</y><width>600</width><height>780</height></rect>
+   <rect><x>0</x><y>0</y><width>1000</width><height>820</height></rect>
   </property>
   <property name="windowTitle">
    <string>Robot Teach Pendant · PyQt5 HMI</string>
@@ -11,110 +11,130 @@
   <widget class="QWidget" name="centralwidget">
    <layout class="QVBoxLayout" name="rootLayout">
     <item>
-     <widget class="QWidget" name="statusRow">
-      <layout class="QHBoxLayout" name="statusLayout">
-       <property name="leftMargin"><number>0</number></property>
-       <property name="topMargin"><number>0</number></property>
-       <property name="rightMargin"><number>0</number></property>
-       <property name="bottomMargin"><number>0</number></property>
-       <item>
-        <widget class="QLabel" name="led">
-         <property name="minimumSize"><size><width>14</width><height>14</height></size></property>
-         <property name="maximumSize"><size><width>14</width><height>14</height></size></property>
-         <property name="text"><string/></property>
-        </widget>
-       </item>
-       <item>
-        <widget class="QLabel" name="title">
-         <property name="text"><string>示教器（未连接）</string></property>
-        </widget>
-       </item>
-      </layout>
-     </widget>
-    </item>
-    <item>
-     <widget class="QGroupBox" name="groupJoints">
-      <property name="title"><string>关节角度 (deg)</string></property>
-      <layout class="QGridLayout" name="jointsGrid">
-       <item row="0" column="0"><widget class="QLabel" name="jlbl_0"><property name="text"><string>J0</string></property></widget></item>
-       <item row="0" column="1"><widget class="QLabel" name="jval_0"><property name="text"><string>0.0</string></property></widget></item>
-       <item row="0" column="2"><widget class="QPushButton" name="jminus_0"><property name="text"><string>-</string></property></widget></item>
-       <item row="0" column="3"><widget class="QPushButton" name="jplus_0"><property name="text"><string>+</string></property></widget></item>
-       <item row="1" column="0"><widget class="QLabel" name="jlbl_1"><property name="text"><string>J1</string></property></widget></item>
-       <item row="1" column="1"><widget class="QLabel" name="jval_1"><property name="text"><string>0.0</string></property></widget></item>
-       <item row="1" column="2"><widget class="QPushButton" name="jminus_1"><property name="text"><string>-</string></property></widget></item>
-       <item row="1" column="3"><widget class="QPushButton" name="jplus_1"><property name="text"><string>+</string></property></widget></item>
-       <item row="2" column="0"><widget class="QLabel" name="jlbl_2"><property name="text"><string>J2</string></property></widget></item>
-       <item row="2" column="1"><widget class="QLabel" name="jval_2"><property name="text"><string>0.0</string></property></widget></item>
-       <item row="2" column="2"><widget class="QPushButton" name="jminus_2"><property name="text"><string>-</string></property></widget></item>
-       <item row="2" column="3"><widget class="QPushButton" name="jplus_2"><property name="text"><string>+</string></property></widget></item>
-       <item row="3" column="0"><widget class="QLabel" name="jlbl_3"><property name="text"><string>J3</string></property></widget></item>
-       <item row="3" column="1"><widget class="QLabel" name="jval_3"><property name="text"><string>0.0</string></property></widget></item>
-       <item row="3" column="2"><widget class="QPushButton" name="jminus_3"><property name="text"><string>-</string></property></widget></item>
-       <item row="3" column="3"><widget class="QPushButton" name="jplus_3"><property name="text"><string>+</string></property></widget></item>
-       <item row="4" column="0"><widget class="QLabel" name="jlbl_4"><property name="text"><string>J4</string></property></widget></item>
-       <item row="4" column="1"><widget class="QLabel" name="jval_4"><property name="text"><string>0.0</string></property></widget></item>
-       <item row="4" column="2"><widget class="QPushButton" name="jminus_4"><property name="text"><string>-</string></property></widget></item>
-       <item row="4" column="3"><widget class="QPushButton" name="jplus_4"><property name="text"><string>+</string></property></widget></item>
-       <item row="5" column="0"><widget class="QLabel" name="jlbl_5"><property name="text"><string>J5</string></property></widget></item>
-       <item row="5" column="1"><widget class="QLabel" name="jval_5"><property name="text"><string>0.0</string></property></widget></item>
-       <item row="5" column="2"><widget class="QPushButton" name="jminus_5"><property name="text"><string>-</string></property></widget></item>
-       <item row="5" column="3"><widget class="QPushButton" name="jplus_5"><property name="text"><string>+</string></property></widget></item>
-       <item row="6" column="0"><widget class="QLabel" name="jlbl_6"><property name="text"><string>J6</string></property></widget></item>
-       <item row="6" column="1"><widget class="QLabel" name="jval_6"><property name="text"><string>0.0</string></property></widget></item>
-       <item row="6" column="2"><widget class="QPushButton" name="jminus_6"><property name="text"><string>-</string></property></widget></item>
-       <item row="6" column="3"><widget class="QPushButton" name="jplus_6"><property name="text"><string>+</string></property></widget></item>
-      </layout>
-     </widget>
-    </item>
-    <item>
-     <widget class="QGroupBox" name="groupCmd">
-      <property name="title"><string>指令</string></property>
-      <layout class="QHBoxLayout" name="cmdLayout">
-       <item><widget class="QPushButton" name="btn_servo_on"><property name="text"><string>Servo ON</string></property></widget></item>
-       <item><widget class="QPushButton" name="btn_servo_off"><property name="text"><string>Servo OFF</string></property></widget></item>
-       <item><widget class="QPushButton" name="btn_stop"><property name="text"><string>Stop</string></property></widget></item>
-       <item><widget class="QPushButton" name="btn_reset"><property name="text"><string>Reset</string></property></widget></item>
-       <item><widget class="QPushButton" name="btn_home"><property name="text"><string>Home</string></property></widget></item>
-      </layout>
-     </widget>
-    </item>
-    <item>
-     <widget class="QGroupBox" name="groupAbs">
-      <property name="title"><string>Move Absolute</string></property>
-      <layout class="QHBoxLayout" name="absLayout">
-       <item><widget class="QLabel" name="albl_0"><property name="text"><string>J0</string></property></widget></item>
-       <item><widget class="QLineEdit" name="ainp_0"><property name="text"><string>0.0</string></property></widget></item>
-       <item><widget class="QLabel" name="albl_1"><property name="text"><string>J1</string></property></widget></item>
-       <item><widget class="QLineEdit" name="ainp_1"><property name="text"><string>0.0</string></property></widget></item>
-       <item><widget class="QLabel" name="albl_2"><property name="text"><string>J2</string></property></widget></item>
-       <item><widget class="QLineEdit" name="ainp_2"><property name="text"><string>0.0</string></property></widget></item>
-       <item><widget class="QLabel" name="albl_3"><property name="text"><string>J3</string></property></widget></item>
-       <item><widget class="QLineEdit" name="ainp_3"><property name="text"><string>0.0</string></property></widget></item>
-       <item><widget class="QLabel" name="albl_4"><property name="text"><string>J4</string></property></widget></item>
-       <item><widget class="QLineEdit" name="ainp_4"><property name="text"><string>0.0</string></property></widget></item>
-       <item><widget class="QLabel" name="albl_5"><property name="text"><string>J5</string></property></widget></item>
-       <item><widget class="QLineEdit" name="ainp_5"><property name="text"><string>0.0</string></property></widget></item>
-       <item><widget class="QLabel" name="albl_6"><property name="text"><string>J6</string></property></widget></item>
-       <item><widget class="QLineEdit" name="ainp_6"><property name="text"><string>0.0</string></property></widget></item>
-       <item><widget class="QPushButton" name="btn_move"><property name="text"><string>Move</string></property></widget></item>
-      </layout>
-     </widget>
-    </item>
-    <item>
-     <widget class="QGroupBox" name="groupAlarm">
-      <property name="title"><string>Alarm</string></property>
-      <layout class="QVBoxLayout" name="alarmLayout">
-       <item><widget class="QLabel" name="alarm_label"><property name="text"><string>—</string></property></widget></item>
-      </layout>
-     </widget>
-    </item>
-    <item>
-     <widget class="QGroupBox" name="groupLog">
-      <property name="title"><string>Log</string></property>
-      <layout class="QVBoxLayout" name="logLayout">
-       <item><widget class="QTextEdit" name="log"><property name="readOnly"><bool>true</bool></property></widget></item>
-      </layout>
+     <widget class="QTabWidget" name="tabWidget">
+      <property name="currentIndex"><number>0</number></property>
+      <widget class="QWidget" name="pagePendant">
+       <layout class="QVBoxLayout" name="pendantLayout">
+        <item>
+         <widget class="QWidget" name="statusRow">
+          <layout class="QHBoxLayout" name="statusLayout">
+           <property name="leftMargin"><number>0</number></property>
+           <property name="topMargin"><number>0</number></property>
+           <property name="rightMargin"><number>0</number></property>
+           <property name="bottomMargin"><number>0</number></property>
+           <item>
+            <widget class="QLabel" name="led">
+             <property name="minimumSize"><size><width>14</width><height>14</height></size></property>
+             <property name="maximumSize"><size><width>14</width><height>14</height></size></property>
+             <property name="text"><string/></property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLabel" name="title">
+             <property name="text"><string>示教器（未连接）</string></property>
+            </widget>
+           </item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QGroupBox" name="groupJoints">
+          <property name="title"><string>关节角度 (deg)</string></property>
+          <layout class="QGridLayout" name="jointsGrid">
+           <item row="0" column="0"><widget class="QLabel" name="jlbl_0"><property name="text"><string>J0</string></property></widget></item>
+           <item row="0" column="1"><widget class="QLabel" name="jval_0"><property name="text"><string>0.0</string></property></widget></item>
+           <item row="0" column="2"><widget class="QPushButton" name="jminus_0"><property name="text"><string>-</string></property></widget></item>
+           <item row="0" column="3"><widget class="QPushButton" name="jplus_0"><property name="text"><string>+</string></property></widget></item>
+           <item row="1" column="0"><widget class="QLabel" name="jlbl_1"><property name="text"><string>J1</string></property></widget></item>
+           <item row="1" column="1"><widget class="QLabel" name="jval_1"><property name="text"><string>0.0</string></property></widget></item>
+           <item row="1" column="2"><widget class="QPushButton" name="jminus_1"><property name="text"><string>-</string></property></widget></item>
+           <item row="1" column="3"><widget class="QPushButton" name="jplus_1"><property name="text"><string>+</string></property></widget></item>
+           <item row="2" column="0"><widget class="QLabel" name="jlbl_2"><property name="text"><string>J2</string></property></widget></item>
+           <item row="2" column="1"><widget class="QLabel" name="jval_2"><property name="text"><string>0.0</string></property></widget></item>
+           <item row="2" column="2"><widget class="QPushButton" name="jminus_2"><property name="text"><string>-</string></property></widget></item>
+           <item row="2" column="3"><widget class="QPushButton" name="jplus_2"><property name="text"><string>+</string></property></widget></item>
+           <item row="3" column="0"><widget class="QLabel" name="jlbl_3"><property name="text"><string>J3</string></property></widget></item>
+           <item row="3" column="1"><widget class="QLabel" name="jval_3"><property name="text"><string>0.0</string></property></widget></item>
+           <item row="3" column="2"><widget class="QPushButton" name="jminus_3"><property name="text"><string>-</string></property></widget></item>
+           <item row="3" column="3"><widget class="QPushButton" name="jplus_3"><property name="text"><string>+</string></property></widget></item>
+           <item row="4" column="0"><widget class="QLabel" name="jlbl_4"><property name="text"><string>J4</string></property></widget></item>
+           <item row="4" column="1"><widget class="QLabel" name="jval_4"><property name="text"><string>0.0</string></property></widget></item>
+           <item row="4" column="2"><widget class="QPushButton" name="jminus_4"><property name="text"><string>-</string></property></widget></item>
+           <item row="4" column="3"><widget class="QPushButton" name="jplus_4"><property name="text"><string>+</string></property></widget></item>
+           <item row="5" column="0"><widget class="QLabel" name="jlbl_5"><property name="text"><string>J5</string></property></widget></item>
+           <item row="5" column="1"><widget class="QLabel" name="jval_5"><property name="text"><string>0.0</string></property></widget></item>
+           <item row="5" column="2"><widget class="QPushButton" name="jminus_5"><property name="text"><string>-</string></property></widget></item>
+           <item row="5" column="3"><widget class="QPushButton" name="jplus_5"><property name="text"><string>+</string></property></widget></item>
+           <item row="6" column="0"><widget class="QLabel" name="jlbl_6"><property name="text"><string>J6</string></property></widget></item>
+           <item row="6" column="1"><widget class="QLabel" name="jval_6"><property name="text"><string>0.0</string></property></widget></item>
+           <item row="6" column="2"><widget class="QPushButton" name="jminus_6"><property name="text"><string>-</string></property></widget></item>
+           <item row="6" column="3"><widget class="QPushButton" name="jplus_6"><property name="text"><string>+</string></property></widget></item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QGroupBox" name="groupCmd">
+          <property name="title"><string>指令</string></property>
+          <layout class="QHBoxLayout" name="cmdLayout">
+           <item><widget class="QPushButton" name="btn_servo_on"><property name="text"><string>Servo ON</string></property></widget></item>
+           <item><widget class="QPushButton" name="btn_servo_off"><property name="text"><string>Servo OFF</string></property></widget></item>
+           <item><widget class="QPushButton" name="btn_stop"><property name="text"><string>Stop</string></property></widget></item>
+           <item><widget class="QPushButton" name="btn_reset"><property name="text"><string>Reset</string></property></widget></item>
+           <item><widget class="QPushButton" name="btn_home"><property name="text"><string>Home</string></property></widget></item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QGroupBox" name="groupAbs">
+          <property name="title"><string>Move Absolute</string></property>
+          <layout class="QHBoxLayout" name="absLayout">
+           <item><widget class="QLabel" name="albl_0"><property name="text"><string>J0</string></property></widget></item>
+           <item><widget class="QLineEdit" name="ainp_0"><property name="text"><string>0.0</string></property></widget></item>
+           <item><widget class="QLabel" name="albl_1"><property name="text"><string>J1</string></property></widget></item>
+           <item><widget class="QLineEdit" name="ainp_1"><property name="text"><string>0.0</string></property></widget></item>
+           <item><widget class="QLabel" name="albl_2"><property name="text"><string>J2</string></property></widget></item>
+           <item><widget class="QLineEdit" name="ainp_2"><property name="text"><string>0.0</string></property></widget></item>
+           <item><widget class="QLabel" name="albl_3"><property name="text"><string>J3</string></property></widget></item>
+           <item><widget class="QLineEdit" name="ainp_3"><property name="text"><string>0.0</string></property></widget></item>
+           <item><widget class="QLabel" name="albl_4"><property name="text"><string>J4</string></property></widget></item>
+           <item><widget class="QLineEdit" name="ainp_4"><property name="text"><string>0.0</string></property></widget></item>
+           <item><widget class="QLabel" name="albl_5"><property name="text"><string>J5</string></property></widget></item>
+           <item><widget class="QLineEdit" name="ainp_5"><property name="text"><string>0.0</string></property></widget></item>
+           <item><widget class="QLabel" name="albl_6"><property name="text"><string>J6</string></property></widget></item>
+           <item><widget class="QLineEdit" name="ainp_6"><property name="text"><string>0.0</string></property></widget></item>
+           <item><widget class="QPushButton" name="btn_move"><property name="text"><string>Move</string></property></widget></item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QGroupBox" name="groupAlarm">
+          <property name="title"><string>Alarm</string></property>
+          <layout class="QVBoxLayout" name="alarmLayout">
+           <item><widget class="QLabel" name="alarm_label"><property name="text"><string>—</string></property></widget></item>
+          </layout>
+         </widget>
+        </item>
+        <item>
+         <widget class="QGroupBox" name="groupLog">
+          <property name="title"><string>Log</string></property>
+          <layout class="QVBoxLayout" name="logLayout">
+           <item><widget class="QTextEdit" name="log"><property name="readOnly"><bool>true</bool></property></widget></item>
+          </layout>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+
+      <widget class="QWidget" name="pageConsole">
+       <layout class="QVBoxLayout" name="consoleLayout">
+        <item>
+         <widget class="QWidget" name="webHost">
+          <property name="minimumSize"><size><width>820</width><height>0</height></size></property>
+         </widget>
+        </item>
+       </layout>
+      </widget>
+
      </widget>
     </item>
    </layout>

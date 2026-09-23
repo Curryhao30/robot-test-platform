@@ -1,0 +1,3 @@
+[run_real_backend] C++ Agent 就绪 @ 127.0.0.1:50051
+[run_real_backend] 示教器 REST 后端 -> http://127.0.0.1:58081
+[run_real_backend] 另开终端运行：py teach_pendant/qt_panel.py --url http://127.0.0.1:58081

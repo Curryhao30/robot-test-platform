@@ -165,13 +165,17 @@ def _run_context(profile):
         cycle_hz=profile.cycle_hz,
         port=_agent_port,
     )
+    # 每个会话（run）重置共享状态，避免跨 run 污染轨迹/波形
+    capture.TRAJECTORY = None
+    capture.WAVEFORMS = []
     if os.environ.get("RTP_WRITE_REPORT") == "1":
         _run_dir = next_run_dir(REPO / "reports")
     else:
         _run_dir = None
     yield _context
     if _run_dir is not None:
-        write_run(_context, _run_dir, trajectory=capture.TRAJECTORY)
+        write_run(_context, _run_dir, trajectory=capture.TRAJECTORY,
+                  waveforms=capture.WAVEFORMS)
         print(f"\n[report] {_run_dir}")
 
 

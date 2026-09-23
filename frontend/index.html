@@ -94,13 +94,21 @@
     </div>
     <div>
       <div class="panel" style="margin-bottom:16px">
-        <h2>运行历史<span style="font-weight:400;color:var(--mut)">（点击展开明细）</span></h2>
+        <h2>运行历史<span style="font-weight:400;color:var(--mut)">（点击展开明细 + 轨迹曲线）</span></h2>
         <div id="runsBox"></div>
       </div>
       <div class="panel">
         <h2>缺陷视图（自动派生 + 人工闭环）</h2>
         <div id="defectsBox"></div>
       </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>实时性波形（最近会话）<span style="font-weight:400;color:var(--mut)">jitter 周期间隔 vs 名义周期 · latency 超标红线</span></h2>
+    <div style="display:flex;gap:12px;flex-wrap:wrap">
+      <img src="/api/waveforms/jitter_1000hz.svg" alt="jitter waveform" style="width:48%;min-width:320px;flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px" onerror="this.parentNode.style.display='none'">
+      <img src="/api/waveforms/latency_1000hz.svg" alt="latency waveform" style="width:48%;min-width:320px;flex:1;background:var(--panel2);border:1px solid var(--line);border-radius:8px;padding:6px" onerror="this.parentNode.style.display='none'">
     </div>
   </div>
 </div>
@@ -238,24 +246,104 @@
   }
 
   var detailCache = {};
+  var hasTraj = {};
   function toggleDetail(runId, rowEl) {
     var dd = rowEl.querySelector('.detail');
     if (dd.classList.contains('open')) { dd.classList.remove('open'); return; }
     dd.classList.add('open');
-    if (detailCache[runId]) { dd.innerHTML = detailCache[runId]; return; }
-    fetch('/api/runs/' + encodeURIComponent(runId))
-      .then(function (r) { return r.json(); })
-      .then(function (d) {
-        if (d.error) { dd.innerHTML = '<div class="empty">' + esc(d.error) + '</div>'; return; }
-        var rows = (d.cases || []).map(function (c) {
-          var st = c.status === 'PASS' ? 'pass' : 'fail';
-          return '<tr><td>' + esc(c.name) + '</td><td><span class="st ' + st + '">' + esc(c.status) + '</span></td>' +
-                 '<td style="color:var(--mut)">' + esc(c.detail || '') + '</td><td>' + (c.duration_s || '').toFixed ? Number(c.duration_s).toFixed(2) + 's' : '' + '</td></tr>';
-        }).join('');
-        var html = '<table><thead><tr><th>用例</th><th>状态</th><th>说明</th><th>耗时</th></tr></thead><tbody>' + rows + '</tbody></table>';
-        detailCache[runId] = html;
-        dd.innerHTML = html;
-      }).catch(function (e) { dd.innerHTML = '<div class="empty">加载失败：' + esc(e) + '</div>'; });
+    if (detailCache[runId]) {
+      dd.innerHTML = detailCache[runId];
+      if (hasTraj[runId]) loadTrajectory(runId, dd);   // 缓存命中也要重画曲线
+      return;
+    }
+    Promise.all([
+      fetch('/api/runs/' + encodeURIComponent(runId)).then(function (r) { return r.json(); }),
+      fetch('/api/runs/' + encodeURIComponent(runId) + '/waveform').then(function (r) { return r.json(); })
+    ]).then(function (res) {
+      var d = res[0], w = res[1];
+      if (d.error) { dd.innerHTML = '<div class="empty">' + esc(d.error) + '</div>'; return; }
+      var rows = (d.cases || []).map(function (c) {
+        var st = c.status === 'PASS' ? 'pass' : 'fail';
+        var dur = (typeof c.duration_s === 'number') ? c.duration_s.toFixed(2) + 's' : '';
+        return '<tr><td>' + esc(c.name) + '</td><td><span class="st ' + st + '">' + esc(c.status) + '</span></td>' +
+               '<td style="color:var(--mut)">' + esc(c.detail || '') + '</td><td>' + dur + '</td></tr>';
+      }).join('');
+      var html = '<table><thead><tr><th>用例</th><th>状态</th><th>说明</th><th>耗时</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+      '<div class="trajBox" style="margin-top:10px;display:none">' +
+      '<div style="display:flex;gap:6px;margin-bottom:6px">' +
+      '<button type="button" class="mbtn" data-m="q">位置</button>' +
+      '<button type="button" class="mbtn" data-m="dq">速度</button>' +
+      '<button type="button" class="mbtn" data-m="ddq">加速度</button>' +
+      '<span style="color:var(--mut);align-self:center;margin-left:6px">7 轴运动轨迹（抽稀采样）</span></div>' +
+      '<div class="trajSvg"></div></div>';
+
+      // 数据曲线（逐周期 jitter / latency 可视化）
+      var curves = (w && w.curves) || [];
+      if (curves.length) {
+        html += '<div style="margin-top:12px"><div style="font-size:13px;color:var(--txt);margin-bottom:8px">数据曲线（逐周期 jitter / latency）</div>';
+        curves.forEach(function (cv) {
+          var hz = cv.cycle_hz || d.cycle_hz || 0;
+          var nominal = hz ? 1000000 / hz : 0;
+          html += '<div style="margin-bottom:14px">' +
+            '<div style="color:var(--mut);font-size:12px;margin-bottom:4px">' + esc(cv.name) +
+            ' · ' + hz + 'Hz · slaves=' + esc(cv.slaves || '-') + ' · overrun=' + (cv.overrun_cycles || 0) + '</div>';
+          html += waveSVG(cv.interval_us.map(function (v) { return v - nominal; }),
+                          {title: 'Cycle Jitter (vs nominal ' + nominal.toFixed(0) + 'us)', yLabel: 'jitter(us)', baseline: 0});
+          html += waveSVG(cv.processing_us,
+                          {title: 'Per-Cycle Processing Latency', yLabel: 'latency(us)', limit: nominal, highlightAbove: nominal});
+          html += '<div style="color:var(--mut);font-size:11px">jitter: ' + esc(cv.jitter_stats || '') +
+                  ' ｜ latency: ' + esc(cv.latency_stats || '') + '</div></div>';
+        });
+        html += '</div>';
+      } else {
+        html += '<div class="note">本 run 无波形数据（仅全量/波形报告分组运行时产生）</div>';
+      }
+      detailCache[runId] = html;
+      dd.innerHTML = html;
+      hasTraj[runId] = !!(d && d.has_trajectory);
+      if (hasTraj[runId]) loadTrajectory(runId, dd);
+    }).catch(function (e) { dd.innerHTML = '<div class="empty">加载失败：' + esc(e) + '</div>'; });
+  }
+
+  var TRAJ_COLORS = ['#38bdf8', '#f472b6', '#a78bfa', '#fbbf24', '#34d399', '#f87171', '#60a5fa'];
+  function drawTraj(svgEl, data, metric) {
+    var series = data[metric];
+    var t = data.time_ms;
+    var W = 780, H = 200, padL = 46, padR = 10, padT = 14, padB = 22;
+    var lo = Infinity, hi = -Infinity;
+    series.forEach(function (a) { a.forEach(function (v) { if (v < lo) lo = v; if (v > hi) hi = v; }); });
+    if (!isFinite(lo) || !isFinite(hi) || lo === hi) { lo = -1; hi = 1; }
+    var n = Math.max(t.length - 1, 1);
+    var x = function (i) { return padL + (i / n) * (W - padL - padR); };
+    var y = function (v) { return padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB); };
+    var h = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block">';
+    for (var g = 0; g <= 4; g++) {
+      var vy = lo + (hi - lo) * g / 4;
+      h += '<line x1="' + padL + '" y1="' + y(vy) + '" x2="' + (W - padR) + '" y2="' + y(vy) + '" stroke="#26334d" stroke-width="1"/>';
+      h += '<text x="' + (padL - 6) + '" y="' + (y(vy) + 4) + '" text-anchor="end" font-size="10" fill="#94a3b8">' + vy.toFixed(Math.abs(vy) < 100 ? 1 : 0) + '</text>';
+    }
+    h += '<text x="' + (W / 2) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="10" fill="#94a3b8">t / ms</text>';
+    series.forEach(function (a, idx) {
+      var pts = [];
+      for (var i = 0; i < a.length; i++) pts.push(x(i).toFixed(1) + ',' + y(a[i]).toFixed(1));
+      h += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + TRAJ_COLORS[idx] + '" stroke-width="1.5"/>';
+    });
+    for (var j = 0; j < 7; j++) h += '<text x="' + (padL + 6 + j * 24) + '" y="' + (padT - 2) + '" font-size="9" fill="' + TRAJ_COLORS[j] + '">J' + (j + 1) + '</text>';
+    h += '</svg>';
+    svgEl.innerHTML = h;
+  }
+  function loadTrajectory(runId, dd) {
+    var box = dd.querySelector('.trajBox');
+    if (!box) return;
+    box.style.display = 'block';
+    fetch('/api/runs/' + encodeURIComponent(runId) + '/trajectory?max_points=400').then(function (r) { return r.json(); }).then(function (d) {
+      if (d.error || !d.q) { box.style.display = 'none'; return; }
+      try { drawTraj(box.querySelector('.trajSvg'), d, 'q'); } catch (e) {
+        box.querySelector('.trajSvg').innerHTML = '<div class=empty>曲线渲染失败：' + esc(e.message || e) + '</div>';
+      }
+      var btns = box.querySelectorAll('.mbtn');
+      btns.forEach(function (b) { b.addEventListener('click', function () { drawTraj(box.querySelector('.trajSvg'), d, b.getAttribute('data-m')); }); });
+    }).catch(function () { box.style.display = 'none'; });
   }
 
   function renderDefects(def) {
@@ -304,6 +392,64 @@
   });
 
   function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+
+  // 零依赖折线图（暗色主题，复用 waveform.py 语义）：baseline 参考线 / limit 阈值线 / overrun 标红
+  function waveSVG(data, o) {
+    o = o || {};
+    var width = 860, height = 190, padL = 56, padR = 16, padT = 26, padB = 30;
+    var plotW = width - padL - padR, plotH = height - padT - padB;
+    var n = data ? data.length : 0;
+    if (!n) return '<div class="empty">' + esc(o.title || '曲线') + '：无数据</div>';
+    var vals = data.slice();
+    if (o.baseline != null) vals.push(o.baseline);
+    if (o.limit != null) vals.push(o.limit);
+    var lo = Math.min.apply(null, vals), hi = Math.max.apply(null, vals);
+    if (hi - lo < 1e-9) hi = lo + 1;
+    var span = hi - lo; lo -= span * 0.08; hi += span * 0.08;
+    function X(i) { return padL + (n > 1 ? i / (n - 1) : 0.5) * plotW; }
+    function Y(v) { return padT + (1 - (v - lo) / (hi - lo)) * plotH; }
+    var s = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 " + width + " " + height +
+            "' style='width:100%;height:auto;display:block' font-family='Segoe UI, Microsoft YaHei, sans-serif'>";
+    s += "<text x='" + padL + "' y='15' font-size='13' fill='#e2e8f0'>" + esc(o.title || '') + "</text>";
+    for (var k = 0; k <= 5; k++) {
+      var v = lo + (hi - lo) * k / 5, yy = Y(v);
+      s += "<line x1='" + padL + "' y1='" + yy.toFixed(1) + "' x2='" + (width - padR) +
+           "' y2='" + yy.toFixed(1) + "' stroke='#334155' stroke-width='1'/>";
+      s += "<text x='" + (padL - 6) + "' y='" + (yy + 4).toFixed(1) +
+           "' font-size='10' fill='#94a3b8' text-anchor='end'>" + v.toFixed(0) + "</text>";
+    }
+    if (o.baseline != null) {
+      var by = Y(o.baseline);
+      s += "<line x1='" + padL + "' y1='" + by.toFixed(1) + "' x2='" + (width - padR) +
+           "' y2='" + by.toFixed(1) + "' stroke='#22d3ee' stroke-width='1.3' stroke-dasharray='5,4'/>";
+    }
+    if (o.limit != null) {
+      var ly = Y(o.limit);
+      s += "<line x1='" + padL + "' y1='" + ly.toFixed(1) + "' x2='" + (width - padR) +
+           "' y2='" + ly.toFixed(1) + "' stroke='#ef4444' stroke-width='1.3'/>";
+    }
+    var pts = [];
+    for (var i = 0; i < n; i++) pts.push(X(i).toFixed(1) + "," + Y(data[i]).toFixed(2));
+    s += "<polyline points='" + pts.join(' ') + "' fill='none' stroke='#38bdf8' stroke-width='1.5' stroke-linejoin='round'/>";
+    if (o.highlightAbove != null) {
+      var seg = [];
+      for (var j = 0; j < n; j++) {
+        if (data[j] > o.highlightAbove) seg.push(X(j).toFixed(1) + "," + Y(data[j]).toFixed(2));
+        else if (seg.length >= 2) { s += redSeg(seg); seg = []; }
+      }
+      if (seg.length >= 2) s += redSeg(seg);
+    }
+    var idxs = [0, Math.floor(n / 2), n - 1];
+    for (var m = 0; m < idxs.length; m++) {
+      s += "<text x='" + X(idxs[m]).toFixed(1) + "' y='" + (height - 9) +
+           "' font-size='10' fill='#64748b' text-anchor='middle'>#" + idxs[m] + "</text>";
+    }
+    s += "</svg>";
+    return s;
+  }
+  function redSeg(seg) {
+    return "<polyline points='" + seg.join(' ') + "' fill='none' stroke='#ef4444' stroke-width='2.2'/>";
+  }
 
   refresh();
   setInterval(function () {

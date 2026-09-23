@@ -13,6 +13,7 @@
 from __future__ import annotations
 
 import ast
+import csv
 import json
 import os
 import pathlib
@@ -21,7 +22,7 @@ import sys
 import time
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -29,6 +30,7 @@ TESTS = REPO / "orchestrator" / "tests"
 ORCHESTRATOR = REPO / "orchestrator"
 REPORTS = REPO / "reports"
 FRONTEND = REPO / "frontend"
+WAVEFORMS = REPORTS / "waveforms"
 
 
 def _defect_state_file() -> pathlib.Path:
@@ -322,8 +324,105 @@ def api_run_detail(run_id: str):
         "passed": summary.get("passed", 0),
         "failed": summary.get("failed", 0),
         "total": summary.get("total", 0),
+        "has_trajectory": (REPORTS / run_id / "trajectory.csv").is_file(),
+        "has_waveforms": _waveform_names() is not None,
         "cases": data.get("cases", []),
     }
+
+
+@app.get("/api/runs/{run_id}/waveform")
+def api_run_waveform(run_id: str):
+    """运行的数据曲线（逐周期 jitter/latency 序列）。
+
+    数据源：test_waveform 产生的 run_*/waveform.json；仅全量或"波形报告"
+    分组运行才会产出。返回 {"curves": [...]}；无波形数据时 curves 为空。
+    """
+    run_dir = REPORTS / run_id
+    # 运行本身不存在 → 404（与 /api/runs/{run_id} 一致）
+    if not (run_dir / "result.json").is_file():
+        return JSONResponse({"error": f"未找到运行记录: {run_id}"}, status_code=404)
+    wj = run_dir / "waveform.json"
+    if not wj.is_file():
+        return {"run_id": run_id, "curves": []}
+    try:
+        data = json.loads(wj.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return JSONResponse({"error": f"波形数据损坏: {run_id}"}, status_code=500)
+    if not isinstance(data, list):
+        return JSONResponse({"error": f"波形数据格式异常: {run_id}"}, status_code=500)
+    return {"run_id": run_id, "curves": data}
+
+
+def _waveform_names():
+    """reports/waveforms 下可用 SVG 波形名列表（空/不存在 → None）。"""
+    if not WAVEFORMS.is_dir():
+        return None
+    names = sorted(f.name for f in WAVEFORMS.glob("*.svg"))
+    return names or None
+
+
+def _sample_trajectory(run_id: str, max_points: int = 500):
+    """读取运行轨迹采样（trajectory.csv）并等间隔抽稀。
+
+    返回 {time_ms, q[7], dq[7], ddq[7]}；不足抽稀直接全量。
+    """
+    csvf = REPORTS / run_id / "trajectory.csv"
+    if not csvf.is_file():
+        return None
+    t0 = None
+    ts: list[float] = []
+    cols = {"q": [[] for _ in range(7)], "dq": [[] for _ in range(7)], "ddq": [[] for _ in range(7)]}
+    try:
+        with csvf.open(encoding="utf-8", newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                try:
+                    ns = int(row["timestamp_ns"])
+                except (ValueError, KeyError):
+                    continue
+                if t0 is None:
+                    t0 = ns
+                ts.append((ns - t0) / 1e6)  # ms
+                for k, names in (("q", [f"q{i}" for i in range(7)]),
+                                 ("dq", [f"dq{i}" for i in range(7)]),
+                                 ("ddq", [f"ddq{i}" for i in range(7)])):
+                    for i in range(7):
+                        try:
+                            cols[k][i].append(float(row[names[i]]))
+                        except (ValueError, KeyError):
+                            cols[k][i].append(0.0)
+    except (OSError, ValueError):
+        return None
+    n = len(ts)
+    if n == 0:
+        return None
+    if n > max_points:
+        idx = [round(i * (n - 1) / (max_points - 1)) for i in range(max_points)]
+        keep = lambda a: [a[i] for i in idx]
+        ts = keep(ts)
+        cols = {k: [keep(a) for a in arr] for k, arr in cols.items()}
+    return {"sample_count": n, "max_points": len(ts), "time_ms": ts,
+            "q": cols["q"], "dq": cols["dq"], "ddq": cols["ddq"]}
+
+
+@app.get("/api/runs/{run_id}/trajectory")
+def api_run_trajectory(run_id: str, max_points: int = 500):
+    """运行轨迹曲线数据（抽稀后），供控制台画位置/速度/加速度曲线。"""
+    data = _sample_trajectory(run_id, min(max(max_points, 5), 2000))
+    if data is None:
+        return JSONResponse({"error": f"该运行无轨迹采样: {run_id}"}, status_code=404)
+    return {"run_id": run_id, **data}
+
+
+@app.get("/api/waveforms/{name}")
+def api_waveform(name: str):
+    """返回 reports/waveforms/*.svg（白名单防路径穿越）。"""
+    if not name.endswith(".svg") or "/" in name or "\\" in name or name.startswith("."):
+        return JSONResponse({"error": "非法文件名"}, status_code=400)
+    f = WAVEFORMS / name
+    if not f.is_file():
+        return JSONResponse({"error": f"未找到波形: {name}"}, status_code=404)
+    return FileResponse(str(f), media_type="image/svg+xml")
 
 
 def _defect_manual(bug_id: str, action: str, reason: str | None) -> dict:

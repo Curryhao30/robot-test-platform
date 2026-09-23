@@ -54,8 +54,13 @@ def next_run_dir(reports_root: pathlib.Path) -> pathlib.Path:
     return d
 
 
-def write_run(ctx: RunContext, run_dir: pathlib.Path, trajectory=None):
-    """写出 result.json / trajectory.csv / report.html / log.txt。"""
+def write_run(ctx: RunContext, run_dir: pathlib.Path, trajectory=None,
+               waveforms=None):
+    """写出 result.json / trajectory.csv / report.html / log.txt / waveform.json。
+
+    waveform.json：逐周期 jitter/latency 序列（源自 test_waveform），供控制台
+    曲线可视化；无波形数据时跳过写盘。
+    """
     # result.json
     result = {
         "profile": {"name": ctx.profile_name, "model": ctx.profile_model},
@@ -69,6 +74,21 @@ def write_run(ctx: RunContext, run_dir: pathlib.Path, trajectory=None):
     }
     (run_dir / "result.json").write_text(
         json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # waveform.json（逐周期曲线数据源，对应"数据曲线可视化"）
+    if waveforms:
+        wf = [{
+            "name": w.get("name", ""),
+            "cycle_hz": w.get("cycle_hz", 0),
+            "slaves": w.get("slaves", ""),
+            "interval_us": [float(x) for x in w.get("interval_us", [])],
+            "processing_us": [float(x) for x in w.get("processing_us", [])],
+            "jitter_stats": w.get("jitter_stats", ""),
+            "latency_stats": w.get("latency_stats", ""),
+            "overrun_cycles": int(w.get("overrun_cycles", 0)),
+        } for w in waveforms]
+        (run_dir / "waveform.json").write_text(
+            json.dumps(wf, ensure_ascii=False, indent=2), encoding="utf-8")
 
     # trajectory.csv（若有轨迹数据：来自 MoveAbsolute 精度用例）
     if trajectory is not None:

@@ -197,6 +197,43 @@ def test_console_run_detail(console_env):
     assert client.get("/api/runs/run_nope").status_code == 404
 
 
+def test_console_run_waveform_endpoint(console_env):
+    # 预置一条带逐周期波形的运行记录
+    wf_dir = console_env / "run_20260923_wf"
+    wf_dir.mkdir(parents=True, exist_ok=True)
+    ctx = RunContext(
+        profile_name="maira_sim", profile_model="MAiRA-SIM-7DOF",
+        controller="Simulation", cycle_hz=500, port=50051,
+        started_at="2026-09-23T00:05:00")
+    ctx.add("test_waveform_500hz_single", "PASS", "ok", 0.5)
+    write_run(ctx, wf_dir, waveforms=[{
+        "name": "test_waveform_500hz_single", "cycle_hz": 500, "slaves": "single",
+        "interval_us": [2000.0 + i for i in range(10)],
+        "processing_us": [120.0 + (i % 3) * 5 for i in range(10)],
+        "jitter_stats": "min=2000 max=2009 mean=2004 std=3 (us)",
+        "latency_stats": "min=120 max=130 mean=124 std=4 (us)",
+        "overrun_cycles": 0,
+    }])
+
+    r = client.get("/api/runs/run_20260923_wf/waveform")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["run_id"] == "run_20260923_wf"
+    assert len(d["curves"]) == 1
+    cv = d["curves"][0]
+    assert cv["cycle_hz"] == 500
+    assert cv["slaves"] == "single"
+    assert len(cv["interval_us"]) == 10
+    assert len(cv["processing_us"]) == 10
+    assert cv["jitter_stats"] and cv["latency_stats"]
+
+    # 有运行但无波形（如 P0 分组）→ 空列表 200
+    r2 = client.get("/api/runs/run_20260923_001/waveform")
+    assert r2.status_code == 200 and r2.json()["curves"] == []
+    # 运行不存在 → 404
+    assert client.get("/api/runs/run_nope/waveform").status_code == 404
+
+
 def test_console_defect_manual_close_reopen(console_env):
     # 初始：latest=002 含 FAIL → BUG-002 OPEN
     d0 = client.get("/api/defects").json()
@@ -217,3 +254,47 @@ def test_console_defect_manual_close_reopen(console_env):
 
     # 人工状态落在注入的 REPORTS 下，不污染真实 reports
     assert (console_env / "defect_state.json").is_file()
+
+
+def test_console_run_trajectory_api(console_env, monkeypatch):
+    import csv
+    # 预置一条带轨迹采样的运行记录（MoveAbsolute 7 轴 x 12 点）
+    td = console_env / "run_20260923_traj" / "trajectory.csv"
+    td.parent.mkdir(parents=True, exist_ok=True)
+    head = "timestamp_ns," + ",".join(["q%d" % i for i in range(7)] + ["dq%d" % i for i in range(7)] + ["ddq%d" % i for i in range(7)])
+    with td.open("w", encoding="utf-8", newline="") as f:
+        f.write(head + "\n")
+        base = 1000000000000
+        for k in range(12):
+            row = [str(base + k * 1000000)] + [str(float(k)) for _ in range(21)]
+            f.write(",".join(row) + "\n")
+
+    r = client.get("/api/runs/run_20260923_traj/trajectory?max_points=8")
+    assert r.status_code == 200
+    d = r.json()
+    assert d["sample_count"] == 12
+    assert d["max_points"] == 8           # 已抽稀
+    assert len(d["time_ms"]) == 8
+    for k in ("q", "dq", "ddq"):
+        assert len(d[k]) == 7 and len(d[k][0]) == 8
+    assert d["time_ms"][0] == 0.0         # 相对起点
+
+    # 无轨迹采样 → 404
+    assert client.get("/api/runs/run_20260923_001/trajectory").status_code == 404
+    assert client.get("/api/runs/run_nope/trajectory").status_code == 404
+
+
+def test_console_waveforms_svg_endpoint(console_env, monkeypatch):
+    # 注入 WAVEFORMS 目录（独立于 REPORTS，避免污染真实 reports/waveforms）
+    wf = console_env / "waveforms"
+    wf.mkdir(parents=True, exist_ok=True)
+    (wf / "jitter_1000hz.svg").write_text('<svg xmlns="http://www.w3.org/2000/svg"></svg>', encoding="utf-8")
+    monkeypatch.setattr(console, "WAVEFORMS", wf)
+
+    r = client.get("/api/waveforms/jitter_1000hz.svg")
+    assert r.status_code == 200
+    assert r.headers["content-type"].startswith("image/svg+xml")
+
+    assert client.get("/api/waveforms/nope.svg").status_code == 404
+    # 路径穿越防护
+    assert client.get("/api/waveforms/..%2Fsecret.svg").status_code in (400, 404)

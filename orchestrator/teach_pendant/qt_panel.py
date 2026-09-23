@@ -12,10 +12,14 @@
 
 运行:
     # 真实模式：先起 teach_pendant 后端（连控制器 gRPC）
-    python -m uvicorn teach_pendant.main:app --port 58081
-    python -m teach_pendant.qt_panel --url http://127.0.0.1:58081
+    py -m uvicorn teach_pendant.main:app --port 58081
+    py -m teach_pendant.qt_panel --url http://127.0.0.1:58081
     # 离线演示（无需控制器/agent）：内置 Mock 控制器
-    python -m teach_pendant.qt_panel --mock
+    py -m teach_pendant.qt_panel --mock
+    # "测试与曲线" 标签页：另起管理控制台（提供 /api/summary 等；只读查看无需 agent）
+    py -m uvicorn app.console:app --port 58090
+    # 完整真实模式（agent + 示教器后端 + 控制台）可用 run_real_backend.py 一键拉起
+    py teach_pendant/run_real_backend.py
 """
 from __future__ import annotations
 
@@ -25,7 +29,8 @@ import sys
 
 from PyQt5.QtCore import QTimer, QUrl
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest
-from PyQt5.QtWidgets import QApplication, QMainWindow
+from PyQt5.QtWebEngineWidgets import QWebEngineView
+from PyQt5.QtWidgets import QApplication, QMainWindow, QVBoxLayout
 
 try:
     from teach_pendant.ui_qt_panel import Ui_QtTeachPendant
@@ -183,10 +188,23 @@ class MockBackend:
 # --------------------------------------------------------------------------
 class QTTeachPendant(QMainWindow, Ui_QtTeachPendant):
     def __init__(self, backend=None, mock: bool = False,
-                 url: str = "http://127.0.0.1:58081"):
+                 url: str = "http://127.0.0.1:58081",
+                 console_url: str = "http://127.0.0.1:58090"):
         super().__init__()
         self.setupUi(self)
         self.backend = backend or (MockBackend() if mock else RestBackend(url))
+
+        # 标签页文字（pyuic 生成的 addTab 未带文字）
+        self.tabWidget.setTabText(0, "示教器")
+        self.tabWidget.setTabText(1, "测试与曲线")
+
+        # Tab2：内嵌控制台网页（用例清单 / 运行历史 / 缺陷视图 / 数据曲线），
+        # 复用 frontend/index.html，零重写；仅查看不需要 controller agent。
+        self.web = QWebEngineView()
+        _wl = QVBoxLayout(self.webHost)
+        _wl.setContentsMargins(0, 0, 0, 0)
+        _wl.addWidget(self.web)
+        self.web.setUrl(QUrl(console_url))
 
         # 收集动态控件
         self.joint_labels = [getattr(self, f"jval_{i}") for i in range(DOF)]
@@ -290,12 +308,15 @@ def main() -> None:
     ap = argparse.ArgumentParser(description="PyQt5 桌面示教器面板")
     ap.add_argument("--url", default="http://127.0.0.1:58081",
                     help="teach_pendant REST 基址（真实模式）")
+    ap.add_argument("--console-url", default="http://127.0.0.1:58090",
+                    help="管理控制台基址（测试与曲线标签页内嵌网页）")
     ap.add_argument("--mock", action="store_true",
                     help="离线模式：内置仿真控制器，无需 agent")
     args = ap.parse_args()
 
     app = QApplication(sys.argv)
-    win = QTTeachPendant(mock=args.mock, url=args.url)
+    win = QTTeachPendant(mock=args.mock, url=args.url,
+                         console_url=args.console_url)
     win.show()
     sys.exit(app.exec_())
 

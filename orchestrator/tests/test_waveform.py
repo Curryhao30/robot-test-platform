@@ -35,6 +35,17 @@ def _waveform_test(client, cycle_hz: int, cycles: int, all_slaves: bool):
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / f"jitter_{cycle_hz}hz.svg").write_text(j_svg, encoding="utf-8")
     (out_dir / f"latency_{cycle_hz}hz.svg").write_text(l_svg, encoding="utf-8")
+    # 逐周期序列随本 run 落盘（控制台曲线可视化数据源）
+    capture.WAVEFORMS.append({
+        "name": "test_waveform_%dhz_%s" % (cycle_hz, "all" if all_slaves else "single"),
+        "cycle_hz": cycle_hz,
+        "slaves": "all" if all_slaves else "single",
+        "interval_us": [float(x) for x in r.interval_us],
+        "processing_us": [float(x) for x in r.processing_us],
+        "jitter_stats": stats_line(list(r.interval_us)),
+        "latency_stats": stats_line(list(r.processing_us)),
+        "overrun_cycles": int(r.overrun_cycles),
+    })
     capture.DETAILS["test_waveform_500hz"] = (
         f"jitter {stats_line(list(r.interval_us))}; "
         f"latency {stats_line(list(r.processing_us))}; "
