@@ -6,6 +6,7 @@
 
 #if !defined(_WIN32)
 #include <arpa/inet.h>
+#include <linux/if_ether.h>  // ETH_P_ALL
 #include <net/if.h>
 #include <netpacket/packet.h>
 #include <sys/socket.h>
