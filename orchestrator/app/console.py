@@ -19,6 +19,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import threading
 import time
 
 from fastapi import FastAPI
@@ -32,6 +33,19 @@ REPORTS = REPO / "reports"
 FRONTEND = REPO / "frontend"
 WAVEFORMS = REPORTS / "waveforms"
 LIVE_ACTIVE = REPORTS / "active.live.jsonl"  # 运行中逐用例轨迹段（SSE 实时曲线数据源）
+MANUAL_ACTIVE = REPORTS / "manual.live.active"  # 手动示波器活跃标记（示教器 jog 采样期间存在）
+# 手动活跃新鲜度阈值：标记文件超过该秒数未更新即视为手动监控已停止（进程退出/残留防泄漏）
+MANUAL_FRESH_SEC = float(os.environ.get("RTP_MANUAL_FRESH_SEC", "10"))
+
+# 跨进程互斥锁：记录当前运行的 pid/启动时间，防止多实例/重复触发各起一个 pytest
+RUN_LOCK_NAME = ".run.lock"
+# 卡死（stalled）判定阈值：实时流超过该秒数没有任何新数据 → 判定卡死并自动中止
+STALL_TIMEOUT_SEC = float(os.environ.get("RTP_STALL_TIMEOUT_SEC", "180"))
+
+
+def _run_lock_file() -> pathlib.Path:
+    """锁文件路径（跟随 REPORTS，测试 monkeypatch REPORTS 后自动指向临时目录）。"""
+    return REPORTS / RUN_LOCK_NAME
 
 
 def _defect_state_file() -> pathlib.Path:
@@ -58,6 +72,8 @@ GROUP_FILE = {g: f for f, g in FILE_GROUP.items()}
 
 # 后台运行状态（同一时间只允许一个）
 _ACTIVE_RUN: dict | None = None
+# 触发/中止/状态查询的互斥锁（FastAPI 同步端点在线程池执行，存在并发窗口）
+_RUN_LOCK = threading.Lock()
 
 
 class _FinishedProc:
@@ -86,32 +102,225 @@ def _subprocess_env() -> dict:
     return env
 
 
+def _pid_alive(pid: int) -> bool:
+    """进程是否存活（不引入 psutil 依赖）。"""
+    try:
+        pid = int(pid)
+    except (TypeError, ValueError):
+        return False
+    if pid <= 0:
+        return False
+    if sys.platform == "win32":
+        try:
+            # 不能用 text=True：tasklist 中文系统输出 GBK，解码抛异常会让 .stdout 变 None
+            cp = subprocess.run(["tasklist", "/FI", f"PID eq {pid}"],
+                                capture_output=True, timeout=5)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        out = (cp.stdout or b"").decode("utf-8", "replace")
+        return str(pid) in out
+    try:
+        os.kill(pid, 0)
+    except OSError:
+        return False
+    return True
+
+
+def _read_run_lock() -> dict | None:
+    """读取跨进程运行锁；文件缺失/损坏/对应进程已死 → None（视为无锁）。"""
+    f = _run_lock_file()
+    try:
+        data = json.loads(f.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if not _pid_alive(data.get("pid")):
+        return None
+    return data
+
+
+def _write_run_lock(active: dict) -> None:
+    """写入跨进程运行锁（pid + 启动时间 + 选择器）。"""
+    f = _run_lock_file()
+    try:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps({
+            "pid": active.get("pid"),
+            "started_at": active.get("started_at"),
+            "selector": active.get("selector"),
+        }, ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _clear_run_lock() -> None:
+    """释放锁：写回 pid=0（而不是删文件），避免清理路径依赖文件删除权限/钩子。"""
+    try:
+        f = _run_lock_file()
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_text(json.dumps({"pid": 0, "released_at":
+                                 time.strftime("%Y-%m-%dT%H:%M:%S")},
+                                ensure_ascii=False), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _progress_signature() -> tuple:
+    """实时流心跳指纹（文件大小 + 修改时间）；文件不存在 → (-1, -1)。"""
+    try:
+        st = LIVE_ACTIVE.stat()
+    except OSError:
+        return (-1, -1)
+    return (st.st_size, int(st.st_mtime))
+
+
+def _manual_active() -> bool:
+    """手动示波器是否活跃：示教器 jog 采样期间 touch 标记文件，超时即失效。
+
+    用新鲜度（mtime）而非文件存在性判定：teach_pendant 进程异常退出时
+    标记文件残留，10s 后自动视为停止，SSE 不会因此永不收尾。
+    """
+    try:
+        st = MANUAL_ACTIVE.stat()
+    except OSError:
+        return False
+    return (time.time() - st.st_mtime) < MANUAL_FRESH_SEC
+
+
+def _terminate_proc(proc, grace: float = 5.0) -> str:
+    """终止运行进程；Windows 下必须杀整棵进程树（pytest 会拉起 controller agent）。
+
+    返回实际使用的方式：taskkill / terminate / kill / failed。
+    """
+    pid = getattr(proc, "pid", None)
+    if sys.platform == "win32":
+        if pid:
+            try:
+                subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"],
+                               capture_output=True, timeout=15)
+            except (OSError, subprocess.SubprocessError):
+                pass
+            return "taskkill"
+        try:
+            proc.terminate()
+            return "terminate"
+        except Exception:  # noqa: BLE001
+            return "failed"
+    try:
+        proc.terminate()
+    except Exception:  # noqa: BLE001
+        pass
+    deadline = time.time() + grace
+    while time.time() < deadline:
+        if proc.poll() is not None:
+            return "terminate"
+        time.sleep(0.2)
+    try:
+        proc.kill()
+        return "kill"
+    except Exception:  # noqa: BLE001
+        return "failed"
+
+
+def _finish_active() -> None:
+    """清理运行态：置空 _ACTIVE_RUN、删锁、删实时流文件（SSE 据此收尾）。"""
+    global _ACTIVE_RUN
+    _ACTIVE_RUN = None
+    _clear_run_lock()
+    try:
+        LIVE_ACTIVE.unlink()
+    except BaseException:  # noqa: BLE001
+        # 清理路径必须尽最大努力且不外溢：删除失败（占用/只读/宿主注入钩子）
+        # 都不应让 status/cancel 接口变成 500，实时流文件本身运行结束即失效。
+        pass
+
+
+def _write_aborted_run(active: dict, status: str, reason: str) -> str | None:
+    """为被中止/卡死的运行补一条运行记录，使其进入运行历史并派生缺陷。
+
+    summary 记为 0 passed / 1 failed / 1 total → _run_view 判为 FAIL，
+    「卡死」不会静默消失，而是像真实失败一样可追溯。
+    """
+    try:
+        REPORTS.mkdir(parents=True, exist_ok=True)
+        today = time.strftime("%Y%m%d")
+        seq = 1
+        while (REPORTS / f"run_{today}_{seq:03d}").exists():
+            seq += 1
+        d = REPORTS / f"run_{today}_{seq:03d}"
+        d.mkdir(parents=True, exist_ok=True)
+        data = {
+            "run_id": d.name,
+            "started_at": active.get("started_at", ""),
+            "profile": {"name": active.get("selector", "")},
+            "cycle_hz": 0,
+            "aborted": True,
+            "abort_reason": reason,
+            "summary": {"passed": 0, "failed": 1, "total": 1},
+            "cases": [{
+                "name": f"__run_{status.lower()}__",
+                "status": "FAIL",
+                "duration": 0.0,
+                "detail": reason,
+            }],
+        }
+        (d / "result.json").write_text(
+            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        return d.name
+    except OSError:
+        return None
+
+
 def _start_test_run(group: str | None = None) -> dict:
     """启动后台 pytest 子进程（全量或单分组文件）。
 
     生产实现：真实 subprocess；测试通过 monkeypatch 本函数替换。
     """
     global _ACTIVE_RUN
-    if _ACTIVE_RUN is not None:
-        raise RuntimeError("已有运行在进行中")
-    cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:warnings"]
-    if group:
-        f = GROUP_FILE.get(group)
-        if f is None:
-            raise ValueError(f"未知分组: {group}")
-        cmd.append("tests/" + f)
-    log = REPORTS / "manual_run.log"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    with log.open("wb") as lf:
-        proc = subprocess.Popen(cmd, cwd=str(ORCHESTRATOR), env=_subprocess_env(),
-                                stdout=lf, stderr=subprocess.STDOUT)
-    _ACTIVE_RUN = {
-        "proc": proc,
-        "pid": proc.pid,
-        "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "selector": group or "全量",
-    }
-    return {"started": True, **_ACTIVE_RUN, "proc": None}
+    # 并发互斥：FastAPI 同步端点跑在线程池，两次 POST 之间存在检查-启动竞态窗口，
+    # 必须加锁；同时先回收已自然结束的运行，再挡住新触发。
+    with _RUN_LOCK:
+        if _ACTIVE_RUN is not None and _ACTIVE_RUN["proc"].poll() is not None:
+            _finish_active()
+        if _ACTIVE_RUN is not None:
+            raise RuntimeError(
+                f"已有运行在进行中（pid={_ACTIVE_RUN.get('pid')}，"
+                f"启动于 {_ACTIVE_RUN.get('started_at')}，"
+                f"选择器 {_ACTIVE_RUN.get('selector')}）；"
+                f"如需中止请先调用 POST /api/runs/cancel")
+        # 跨进程残留：本实例没在运行，但锁文件里的 pid 仍活着（另一个控制台实例/孤儿 pytest）
+        stray = _read_run_lock()
+        if stray:
+            raise RuntimeError(
+                f"检测到未受本实例管理的运行中任务（pid={stray.get('pid')}，"
+                f"启动于 {stray.get('started_at')}）；两个 pytest 同时驱动同一控制器会死锁。"
+                f"请先结束该进程或调用 POST /api/runs/cancel")
+        cmd = [sys.executable, "-m", "pytest", "-q", "-p", "no:warnings"]
+        if group:
+            f = GROUP_FILE.get(group)
+            if f is None:
+                raise ValueError(f"未知分组: {group}")
+            cmd.append("tests/" + f)
+        log = REPORTS / "manual_run.log"
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with log.open("wb") as lf:
+            proc = subprocess.Popen(cmd, cwd=str(ORCHESTRATOR), env=_subprocess_env(),
+                                    stdout=lf, stderr=subprocess.STDOUT)
+        now = time.time()
+        _ACTIVE_RUN = {
+            "proc": proc,
+            "pid": proc.pid,
+            "started_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "selector": group or "全量",
+            # 心跳：实时流指纹 + 最近一次有进展的时刻（卡死检测用）
+            "last_sig": _progress_signature(),
+            "last_progress": now,
+        }
+        _write_run_lock(_ACTIVE_RUN)
+        return {"started": True, **{k: v for k, v in _ACTIVE_RUN.items()
+                                    if k not in ("proc", "last_sig", "last_progress")},
+                "proc": None, "stall_timeout_sec": STALL_TIMEOUT_SEC}
 
 
 def _scan_cases() -> list[dict]:
@@ -318,39 +527,113 @@ def api_active_stream():
 
     前端 EventSource 连接；运行结束（live 文件被清理）→ 流自动结束。
     数据全部来自 C++ Agent 批量采样后逐用例落盘的 active.live.jsonl。
+    手动示波器（示教器 jog 采样）期间同样保持活跃（见 /api/manual/active）。
     """
     return StreamingResponse(
-        _active_stream_gen(LIVE_ACTIVE, lambda: _ACTIVE_RUN is not None),
+        _active_stream_gen(LIVE_ACTIVE,
+                           lambda: _ACTIVE_RUN is not None or _manual_active()),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 
+@app.get("/api/manual/active")
+def api_manual_active():
+    """手动示波器活跃状态：示教器 jog 采样期间 true（前端 2s 心跳探测后连 SSE）。"""
+    return {"active": _manual_active()}
+
+
 @app.get("/api/runs/status")
 def api_run_status():
-    """后台运行进度；结束后返回最新 run。"""
+    """后台运行进度 + 心跳/卡死检测；结束后返回最新 run。
+
+    心跳语义：以实时流文件 active.live.jsonl 的大小/修改时间作为"进展指纹"，
+    指纹变化即刷新 last_progress。超过 STALL_TIMEOUT_SEC（默认 180s，
+    可用 RTP_STALL_TIMEOUT_SEC 覆盖）仍无进展 → 判定卡死：
+    自动杀掉进程树，并补一条 FAILED 运行记录（不静默消失，可派生缺陷）。
+    """
     global _ACTIVE_RUN
-    active = _ACTIVE_RUN
-    latest = None
-    if active is not None:
-        proc = active["proc"]
-        if proc.poll() is None:
+    with _RUN_LOCK:
+        active = _ACTIVE_RUN
+        if active is not None and active["proc"].poll() is not None:
+            _finish_active()                     # 自然结束：清理并落到下面返回 latest
+            active = None
+        if active is not None:
+            sig = _progress_signature()
+            now = time.time()
+            prev = active.get("last_sig")
+            if prev is None or tuple(prev) != sig:
+                active["last_sig"] = sig
+                active["last_progress"] = now
+            idle = now - float(active.get("last_progress", now))
+            if idle > STALL_TIMEOUT_SEC:
+                # 卡死：终止 + 落失败记录 + 清理
+                how = _terminate_proc(active["proc"])
+                reason = (f"运行卡死：{int(idle)}s 内实时流无新数据"
+                          f"（阈值 {int(STALL_TIMEOUT_SEC)}s），已自动中止")
+                run_id = _write_aborted_run(active, "STALLED", reason)
+                selector, pid, started_at = (active.get("selector"),
+                                             active.get("pid"), active.get("started_at"))
+                _finish_active()
+                runs = _iter_runs()
+                latest = _run_view(runs[0]) if runs else None
+                return {
+                    "running": False,
+                    "stalled": True,
+                    "auto_cancelled": True,
+                    "stalled_seconds": round(idle, 1),
+                    "stall_timeout_sec": STALL_TIMEOUT_SEC,
+                    "method": how,
+                    "aborted_run": run_id,
+                    "selector": selector,
+                    "pid": pid,
+                    "started_at": started_at,
+                    "latest_run": latest,
+                }
             return {
                 "running": True,
-                "started_at": active["started_at"],
-                "selector": active["selector"],
-                "pid": active["pid"],
-                "latest_run": latest,
+                "started_at": active.get("started_at"),
+                "selector": active.get("selector"),
+                "pid": active.get("pid"),
+                "latest_run": None,
+                "stalled": False,
+                "idle_seconds": round(idle, 1),
+                "stall_timeout_sec": STALL_TIMEOUT_SEC,
             }
-        _ACTIVE_RUN = None
-        try:
-            LIVE_ACTIVE.unlink()  # 运行结束：清理实时流（SSE 据此收尾）
-        except OSError:
-            pass
     runs = _iter_runs()
-    if runs:
-        latest = _run_view(runs[0])
-    return {"running": False, "latest_run": latest}
+    latest = _run_view(runs[0]) if runs else None
+    return {"running": False, "stalled": False,
+            "stall_timeout_sec": STALL_TIMEOUT_SEC, "latest_run": latest}
+
+
+@app.post("/api/runs/cancel")
+def api_run_cancel(payload: dict | None = None):
+    """中止当前运行：先杀进程树，再补一条 ABORTED 运行记录。
+
+    body 可选 {"reason": "..."}。用于运行卡死/误触发时人工介入，
+    不必再手动 taskkill。无运行中任务 → 409。
+    """
+    global _ACTIVE_RUN
+    body = payload or {}
+    reason = body.get("reason") or "用户手动中止"
+    with _RUN_LOCK:
+        active = _ACTIVE_RUN
+        if active is None:
+            return JSONResponse({"cancelled": False, "error": "当前没有运行中的任务"},
+                                status_code=409)
+        proc = active["proc"]
+        if proc.poll() is not None:
+            _finish_active()
+            runs = _iter_runs()
+            latest = _run_view(runs[0]) if runs else None
+            return {"cancelled": False, "error": "运行已结束（无需中止）", "latest_run": latest}
+        how = _terminate_proc(proc)
+        run_id = _write_aborted_run(active, "ABORTED", reason)
+        info = {"cancelled": True, "method": how, "aborted_run": run_id,
+                "pid": active.get("pid"), "selector": active.get("selector"),
+                "started_at": active.get("started_at"), "reason": reason}
+        _finish_active()
+        return info
 
 
 @app.get("/api/runs/{run_id}")

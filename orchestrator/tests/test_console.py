@@ -124,11 +124,25 @@ def test_console_summary_consistency(console_env):
 # ---------------- 可操作版：触发运行 / 状态 / 明细 / 缺陷人工闭环 ----------------
 
 class _FakeProc:
+    """替身进程：poll() 返回预设返回码；pid=None 保证中止路径不会杀真实进程。"""
+
     def __init__(self, rc):
         self._rc = rc
+        self.pid = None
+        self.terminated = False
+        self.killed = False
 
     def poll(self):
         return self._rc
+
+    def terminate(self):
+        self.terminated = True
+        if self._rc is None:
+            self._rc = -15
+
+    def kill(self):
+        self.killed = True
+        self._rc = -9
 
 
 def test_console_run_trigger_and_status(console_env, monkeypatch):
@@ -357,3 +371,147 @@ def test_active_stream_http_event_stream(console_env, monkeypatch):
     assert r.headers["content-type"].startswith("text/event-stream")
     assert r.text.count("data: {") == 2
     assert "test_a" in r.text and "test_b" in r.text
+
+
+# ---------------------------------------------------------------------------
+# 手动示波器（P3）：示教器 jog 采样期间 SSE 保持活跃 + /api/manual/active
+# ---------------------------------------------------------------------------
+def test_console_manual_active_endpoint(console_env, monkeypatch):
+    """手动活跃标记：无标记 false；touch 后 true；mtime 过期后自动失效。"""
+    import os
+    import time
+    flag = console_env / "manual.live.active"
+    monkeypatch.setattr(console, "MANUAL_ACTIVE", flag)
+
+    assert client.get("/api/manual/active").json()["active"] is False
+    flag.write_text("1", encoding="utf-8")
+    assert client.get("/api/manual/active").json()["active"] is True
+    # 标记过期（进程异常退出的残留场景）→ 判定为 inactive，SSE 不会永不收尾
+    old = time.time() - 30
+    os.utime(flag, (old, old))
+    assert client.get("/api/manual/active").json()["active"] is False
+
+
+def test_active_stream_is_active_includes_manual(console_env, monkeypatch):
+    """SSE 活跃判定 = 有运行 OR 手动监控活跃（残留标记随新鲜度失效）。"""
+    import os
+    import time
+    flag = console_env / "manual.live.active"
+    monkeypatch.setattr(console, "MANUAL_ACTIVE", flag)
+    console._ACTIVE_RUN = None
+    try:
+        assert console._manual_active() is False
+        flag.write_text("1", encoding="utf-8")
+        assert console._manual_active() is True
+        old = time.time() - 30
+        os.utime(flag, (old, old))
+        assert console._manual_active() is False
+    finally:
+        console._ACTIVE_RUN = None
+
+
+# ---------------- 运行治理：并发互斥 / 中止 / 卡死自动中止 ----------------
+
+def _begin_fake_run(console, monkeypatch, tmp_path, selector="全量"):
+    """起一个假运行（不拉真实子进程），并把 live 流/锁都指向临时目录。"""
+    import time
+    console._ACTIVE_RUN = None
+    monkeypatch.setattr(console, "LIVE_ACTIVE", tmp_path / "active.live.jsonl")
+    console._ACTIVE_RUN = {
+        "proc": _FakeProc(None), "pid": None,
+        "started_at": "2026-09-23T00:06:00", "selector": selector,
+        # 心跳起点取当前时间，否则会被判定为"长时间无进展"
+        "last_sig": (-1, -1), "last_progress": time.time(),
+    }
+
+
+def test_console_run_status_reports_heartbeat(console_env, monkeypatch):
+    """运行中的 status 必须带心跳字段（idle_seconds / stall_timeout_sec）。"""
+    import app.console as console
+    _begin_fake_run(console, monkeypatch, console_env)
+    try:
+        s = client.get("/api/runs/status").json()
+        assert s["running"] is True
+        assert s["stalled"] is False
+        assert "idle_seconds" in s and s["idle_seconds"] >= 0
+        assert s["stall_timeout_sec"] == console.STALL_TIMEOUT_SEC
+    finally:
+        console._ACTIVE_RUN = None
+
+
+def test_console_run_rejects_concurrent_with_active_run(console_env, monkeypatch):
+    """已有运行 → 新触发被拒（409），且错误信息可直接指引到 cancel 接口。"""
+    import app.console as console
+    _begin_fake_run(console, monkeypatch, console_env)
+    try:
+        r = client.post("/api/runs", json={})
+        assert r.status_code == 409
+        assert "已有运行在进行中" in r.json()["error"]
+        assert "/api/runs/cancel" in r.json()["error"]
+    finally:
+        console._ACTIVE_RUN = None
+
+
+def test_console_run_rejects_stray_lock(console_env, monkeypatch):
+    """跨进程残留锁：本实例无运行但锁里 pid 仍存活 → 拒绝触发（防双 pytest 抢控制器）。"""
+    import os
+    import app.console as console
+    console._ACTIVE_RUN = None
+    lock = console_env / ".run.lock"
+    lock.write_text('{"pid": %d, "started_at": "2026-09-23T00:07:00", "selector": "全量"}'
+                    % os.getpid(), encoding="utf-8")
+    r = client.post("/api/runs", json={})
+    assert r.status_code == 409
+    assert "未受本实例管理" in r.json()["error"]
+
+
+def test_console_run_cancel_aborts_and_records(console_env, monkeypatch):
+    """中止：进程被终止 + 落一条 ABORTED 记录 + 运行态与锁被清理。"""
+    import json
+    import app.console as console
+    _begin_fake_run(console, monkeypatch, console_env)
+    r = client.post("/api/runs/cancel", json={"reason": "测试中止"})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["cancelled"] is True
+    assert d["reason"] == "测试中止"
+    # 中止记录落盘，且视图判为 FAIL（卡死/中止不会静默消失）
+    run_id = d["aborted_run"]
+    rec = json.loads((console_env / run_id / "result.json").read_text(encoding="utf-8"))
+    assert rec["aborted"] is True
+    assert rec["summary"] == {"passed": 0, "failed": 1, "total": 1}
+    assert console._ACTIVE_RUN is None
+    # 锁被释放（写回 pid=0，不再视为有运行中任务）
+    lock = json.loads((console_env / ".run.lock").read_text(encoding="utf-8"))
+    assert lock["pid"] == 0
+    assert console._read_run_lock() is None
+    # 中止记录进入运行历史
+    hist = client.get("/api/runs").json()
+    assert any(x["run_id"] == run_id and x["status"] == "FAIL" for x in hist["runs"])
+
+
+def test_console_run_cancel_when_idle(console_env, monkeypatch):
+    """没有运行中的任务时调用中止 → 409（明确语义，不静默成功）。"""
+    import app.console as console
+    console._ACTIVE_RUN = None
+    r = client.post("/api/runs/cancel", json={})
+    assert r.status_code == 409
+    assert r.json()["cancelled"] is False
+
+
+def test_console_run_status_auto_cancels_on_stall(console_env, monkeypatch):
+    """卡死检测：实时流长时间无进展 → status 自动中止并标记失败。"""
+    import app.console as console
+    _begin_fake_run(console, monkeypatch, console_env)
+    # 模拟"已经 500s 没有任何新数据"（超过默认 180s 阈值）
+    import time
+    console._ACTIVE_RUN["last_progress"] = time.time() - 500
+    s = client.get("/api/runs/status").json()
+    assert s["running"] is False
+    assert s["stalled"] is True
+    assert s["auto_cancelled"] is True
+    assert s["stalled_seconds"] > 0
+    assert s["aborted_run"]
+    rec = (console_env / s["aborted_run"] / "result.json").read_text(encoding="utf-8")
+    assert "卡死" in rec
+    assert console._ACTIVE_RUN is None

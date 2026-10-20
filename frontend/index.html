@@ -22,6 +22,7 @@
   .ops { margin-left: auto; display: flex; gap: 8px; align-items: center; }
   select, button { font: inherit; font-size: 13px; border-radius: 6px; padding: 7px 10px; border: 1px solid var(--line); background: var(--panel2); color: var(--txt); cursor: pointer; }
   button.primary { background: var(--acc); color: #062033; border-color: var(--acc); font-weight: 600; }
+  button.danger { background: var(--bad); color: #fff; border-color: var(--bad); font-weight: 600; }
   button:disabled { opacity: .45; cursor: not-allowed; }
   button.mini { padding: 2px 8px; font-size: 11px; }
   button.mini.close { color: var(--ok); border-color: var(--ok); }
@@ -73,6 +74,7 @@
     <div class="ops">
       <select id="grp"><option value="">全量运行</option></select>
       <button class="primary" id="runBtn" disabled>运行测试</button>
+      <button class="danger" id="cancelBtn" style="display:none">中止</button>
     </div>
   </header>
 
@@ -129,6 +131,7 @@
   var liveX = [];           // 累计时间 ms（段间延续）
   var liveQ = [];           // 7 轴关节角（逐段 append）
   var liveSegs = 0;
+  var liveRetry = 0;        // 流未就绪时的重连计数
 
   function toast(msg) {
     var t = $('toast');
@@ -139,12 +142,20 @@
   }
 
   var LIVE_COLORS = ['#38bdf8', '#f472b6', '#a78bfa', '#fbbf24', '#34d399', '#f87171', '#60a5fa'];
+  function resetLive() {
+    // 新一轮运行：断开旧流并清空累计数据，避免与上一轮曲线混在一起
+    if (liveES) { liveES.close(); liveES = null; }
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    liveX = []; liveQ = []; liveSegs = 0; liveRetry = 0;
+    var box = document.querySelector('.liveSvg');
+    if (box) box.innerHTML = '<div class="empty">等待轨迹数据…</div>';
+  }
   function ensureLive() {
     if (liveES) return;
     $('livePanel').style.display = 'block';
     $('liveNote').textContent = '连接实时流…';
     var es = new EventSource('/api/runs/active/stream');
-    es.onopen = function () { $('liveNote').textContent = '实时流已连接 · 已接收 ' + liveSegs + ' 段'; };
+    es.onopen = function () { liveRetry = 0; $('liveNote').textContent = '实时流已连接 · 已接收 ' + liveSegs + ' 段'; };
     es.onmessage = function (ev) {
       var seg;
       try { seg = JSON.parse(ev.data); } catch (e) { return; }
@@ -163,14 +174,24 @@
       }
     };
     es.onerror = function () {
-      if (es.readyState === EventSource.CLOSED) stopLive(true);
+      if (es.readyState === EventSource.CLOSED) {
+        liveES = null;                       // 允许重连
+        // 刚点运行时后端可能还没注册 active，流会立刻关闭 → 短暂重试
+        if (liveSegs === 0 && (liveRetry = (liveRetry || 0) + 1) <= 10) {
+          $('liveNote').textContent = '等待实时数据… 重试 ' + liveRetry + '/10';
+          setTimeout(ensureLive, 600);
+          return;
+        }
+        liveRetry = 0;
+        stopLive(true, '连接已结束 · 本会话共接收 ' + liveSegs + ' 段轨迹（手动 jog 或下次运行会自动重连）');
+      }
     };
     liveES = es;
   }
-  function stopLive(final) {
+  function stopLive(final, msg) {
     if (liveES) { liveES.close(); liveES = null; }
     if (final && liveSegs) {
-      $('liveNote').textContent = '运行结束 · 本会话共接收 ' + liveSegs + ' 段轨迹（可点开运行历史回看完整曲线）';
+      $('liveNote').textContent = msg || ('运行结束 · 本会话共接收 ' + liveSegs + ' 段轨迹（可点开运行历史回看完整曲线）');
     }
   }
   function drawLive() {
@@ -181,7 +202,14 @@
     liveQ.forEach(function (a) { a.forEach(function (v) { if (v < lo) lo = v; if (v > hi) hi = v; }); });
     if (!isFinite(lo) || !isFinite(hi) || lo === hi) { lo = -1; hi = 1; }
     var n = Math.max(liveX.length - 1, 1);
-    var x = function (i) { return padL + (i / n) * (W - padL - padR); };
+    // 手动示波器常驻采样会让点数持续增长：超过 MAX_PTS 后抽稀绘制（数据不丢，只降绘制密度）
+    var MAX_PTS = 2000;
+    var stride = liveX.length > MAX_PTS ? Math.ceil(liveX.length / MAX_PTS) : 1;
+    var idx = [];
+    for (var i = 0; i < liveX.length; i += stride) idx.push(i);
+    if (idx[idx.length - 1] !== liveX.length - 1) idx.push(liveX.length - 1);
+    var nDraw = Math.max(idx.length - 1, 1);
+    var x = function (i) { return padL + (i / nDraw) * (W - padL - padR); };
     var y = function (v) { return padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB); };
     var h = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block">';
     for (var g = 0; g <= 4; g++) {
@@ -190,10 +218,13 @@
       h += '<text x="' + (padL - 6) + '" y="' + (y(vy) + 4) + '" text-anchor="end" font-size="10" fill="#94a3b8">' + vy.toFixed(Math.abs(vy) < 100 ? 1 : 0) + '</text>';
     }
     h += '<text x="' + (W / 2) + '" y="' + (H - 6) + '" text-anchor="middle" font-size="10" fill="#94a3b8">运行累计 t / ms</text>';
-    liveQ.forEach(function (a, idx) {
+    liveQ.forEach(function (a, ai) {
       var pts = [];
-      for (var i = 0; i < a.length; i++) pts.push(x(i).toFixed(1) + ',' + y(a[i]).toFixed(1));
-      h += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + LIVE_COLORS[idx] + '" stroke-width="1.5"/>';
+      for (var k = 0; k < idx.length; k++) {
+        var i2 = idx[k];
+        pts.push(x(k).toFixed(1) + ',' + y(a[i2]).toFixed(1));
+      }
+      h += '<polyline points="' + pts.join(' ') + '" fill="none" stroke="' + LIVE_COLORS[ai] + '" stroke-width="1.5"/>';
     });
     for (var j = 0; j < Math.min(liveQ.length, 7); j++) h += '<text x="' + (padL + 6 + j * 24) + '" y="' + (padT - 2) + '" font-size="9" fill="' + LIVE_COLORS[j] + '">J' + (j + 1) + '</text>';
     h += '</svg>';
@@ -247,7 +278,10 @@
         var b = $('bStatus');
         if (s.running) {
           $('runBtn').disabled = true;
-          b.textContent = '运行中… ' + s.selector;
+          $('cancelBtn').style.display = '';           // 运行中才允许中止
+          var idle = s.idle_seconds || 0;
+          b.textContent = '运行中… ' + s.selector +
+            '（' + idle.toFixed(0) + 's/' + Math.round(s.stall_timeout_sec || 0) + 's 无数据）';
           b.className = 'badge run';
           ensureLive();
           if (!pollTimer) {
@@ -256,7 +290,14 @@
                 if (!s2.running) {
                   clearInterval(pollTimer); pollTimer = null;
                   stopLive(true);
-                  toast('运行完成');
+                  $('cancelBtn').style.display = 'none';
+                  if (s2.auto_cancelled) {
+                    // 卡死被自动中止：明确告知，并指向落盘的失败记录
+                    toast('运行卡死已自动中止（' + Math.round(s2.stalled_seconds || 0) +
+                          's 无数据）· 记录 ' + (s2.aborted_run || ''));
+                  } else {
+                    toast('运行完成');
+                  }
                   refresh();
                 }
               }).catch(function () {});
@@ -264,7 +305,12 @@
           }
         } else {
           $('runBtn').disabled = false;
+          $('cancelBtn').style.display = 'none';
           if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+          if (s.auto_cancelled) {
+            toast('运行卡死已自动中止 · 记录 ' + (s.aborted_run || ''));
+            refresh();
+          }
         }
       }).catch(function () {});
   }
@@ -276,9 +322,44 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(group ? { group: group } : {})
     }).then(function (r) { return r.json(); }).then(function (res) {
-      if (res.started) { toast('已启动运行：' + (res.selector || '全量')); refresh(); }
+      if (res.started) {
+        toast('已启动运行：' + (res.selector || '全量'));
+        resetLive();      // 清空上一轮曲线
+        ensureLive();     // 立刻打开实时曲线面板，不等 15s 轮询
+        try { $('livePanel').scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {}
+        $('runBtn').disabled = true;
+        var b = $('bStatus');
+        b.textContent = '运行中… ' + (res.selector || '全量');
+        b.className = 'badge run';
+        refresh();
+        checkStatus();    // 立刻挂上 3s 完成检测
+      }
       else { toast(res.error || '启动失败'); }
     }).catch(function (e) { toast('请求失败：' + e); });
+  });
+
+  $('cancelBtn').addEventListener('click', function () {
+    if (!confirm('确定中止当前运行？将杀掉 pytest 进程树并记为一次失败运行。')) return;
+    $('cancelBtn').disabled = true;
+    fetch('/api/runs/cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: '控制台手动中止' })
+    }).then(function (r) { return r.json(); }).then(function (res) {
+      $('cancelBtn').disabled = false;
+      if (res.cancelled) {
+        toast('已中止运行 · 记为 ' + (res.aborted_run || ''));
+        stopLive(true);
+        $('cancelBtn').style.display = 'none';
+        $('runBtn').disabled = false;
+        refresh();
+      } else {
+        toast(res.error || '中止失败');
+      }
+    }).catch(function (e) {
+      $('cancelBtn').disabled = false;
+      toast('中止请求失败：' + e);
+    });
   });
 
   function renderCases(cases) {
@@ -525,6 +606,14 @@
   function redSeg(seg) {
     return "<polyline points='" + seg.join(' ') + "' fill='none' stroke='#ef4444' stroke-width='2.2'/>";
   }
+
+  // ---- 手动示波器：示教器 jog 采样期间自动连上实时曲线（2s 心跳探测）----
+  function checkManual() {
+    fetch('/api/manual/active').then(function (r) { return r.json(); }).then(function (d) {
+      if (d.active) ensureLive();            // 活跃即连流；断流后下次心跳自动重连
+    }).catch(function () {});
+  }
+  setInterval(checkManual, 2000);
 
   refresh();
   setInterval(function () {

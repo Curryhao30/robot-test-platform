@@ -3,10 +3,18 @@
 前端（static/index.html）只通过 REST 交互；本模块复用
 orchestrator/app/client.py 的 ControllerClient，与 pytest 走同一 gRPC 通道，
 保证"UI 操作 -> Controller State"的联合测试语义。
+
+手动示波器（P3 扩展）：第一次 jog 后启动常驻采样线程（MANUAL_HZ），
+每个采样周期读控制器关节位置，按批写入 reports/active.live.jsonl
+（与控制台 SSE 实时曲线同一数据源），并 touch reports/manual.live.active
+标记手动活跃 —— 控制台前端据此自动连上实时曲线，"像示波器一样边动边画"。
 """
 from __future__ import annotations
 
+import json
 import os
+import threading
+import time
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -18,6 +26,15 @@ from pydantic import BaseModel
 
 from app.client import ControllerClient
 
+REPO = Path(__file__).resolve().parents[2]
+REPORTS = REPO / "reports"
+LIVE_ACTIVE = REPORTS / "active.live.jsonl"      # 与控制台 SSE 实时曲线同一文件
+MANUAL_ACTIVE = REPORTS / "manual.live.active"   # 手动活跃标记（控制台 10s 新鲜度判定）
+
+MANUAL_HZ = 50                # 采样频率（示波器观感，agent 1000Hz 控制周期内充足）
+MANUAL_BATCH_MS = 240         # 每批点数对应毫秒数 → 每行一段（SSE 增量推送粒度）
+MANUAL_MAX_BYTES = 4 * 1024 * 1024  # live 文件上限：超限清空轮转（防长挂爆盘）
+
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
@@ -26,13 +43,23 @@ async def lifespan(_app: FastAPI):
     profile_path = os.environ.get("RTP_PROFILE")
     if target and profile_path:
         start(target, profile_path)
+    # 干净启动：清掉上次进程残留的手动活跃标记（避免 SSE 判定为仍活跃）
+    try:
+        MANUAL_ACTIVE.unlink()
+    except BaseException:  # noqa: BLE001
+        pass
     yield
+    _stop_manual_sampling()
 
 
 app = FastAPI(title="Virtual Teach Pendant API", lifespan=lifespan)
 
 client: ControllerClient | None = None
 profile: dict = {}
+
+# 手动采样线程状态（第一次 jog 激活，进程存活期间常驻）
+_sampler: threading.Thread | None = None
+_sample_stop: threading.Event | None = None
 
 JOG_STEP_DEG = 5.0
 DOF = 7
@@ -61,6 +88,91 @@ def _require() -> ControllerClient:
 
 def _joints(st) -> list[float]:
     return [j.position for j in st.joints]
+
+
+# ---------------------------------------------------------------------------
+# 手动示波器：常驻采样线程，把控制器关节位置写入 live 流（SSE 实时曲线数据源）
+# ---------------------------------------------------------------------------
+def _touch_manual() -> None:
+    """更新手动活跃标记（mtime 新鲜度；控制台据此判定手动监控在线）。"""
+    try:
+        REPORTS.mkdir(parents=True, exist_ok=True)
+        now = time.time()
+        if MANUAL_ACTIVE.is_file():
+            # touch：仅更新 mtime，避免 open("w") 竞态清空
+            os.utime(MANUAL_ACTIVE, (now, now))
+        else:
+            MANUAL_ACTIVE.write_text("1", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _write_manual_segment(buf: list[tuple[float, list[float]]], t0: float) -> None:
+    """一批采样点 → 一行 JSON 段（与控制台 SSE 段格式一致，前端零改动渲染）。"""
+    if not buf:
+        return
+    seg = {
+        "case": "manual-jog",
+        "n": len(buf),
+        "t_ms": [(t - t0) * 1e3 for t, _ in buf],
+        "q": [q for _, q in buf],
+    }
+    try:
+        REPORTS.mkdir(parents=True, exist_ok=True)
+        if LIVE_ACTIVE.is_file() and LIVE_ACTIVE.stat().st_size > MANUAL_MAX_BYTES:
+            LIVE_ACTIVE.write_text("", encoding="utf-8")   # 轮转保护：防长挂爆盘
+        with LIVE_ACTIVE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(seg, ensure_ascii=False) + "\n")
+    except OSError:
+        pass
+
+
+def _sample_loop(stop: threading.Event) -> None:
+    """50Hz 读控制器关节位置，每 MANUAL_BATCH_MS 攒一批写一段 live 流。"""
+    period = 1.0 / MANUAL_HZ
+    buf: list[tuple[float, list[float]]] = []
+    t0 = time.time()
+    while not stop.is_set():
+        _touch_manual()
+        try:
+            st = _require().get_state()
+            joints = _joints(st)
+        except BaseException:  # noqa: BLE001  agent 未就绪/瞬时 RPC 失败：跳过该周期
+            joints = None
+        if joints is not None:
+            now = time.time()
+            if not buf:
+                t0 = now
+            buf.append((now, joints))
+            if (now - t0) * 1e3 >= MANUAL_BATCH_MS:
+                _write_manual_segment(buf, t0)
+                buf = []
+        stop.wait(period)
+
+
+def _ensure_manual_sampling() -> None:
+    """幂等启动手动采样线程（第一次 jog 激活；进程存活期间常驻）。"""
+    global _sampler, _sample_stop
+    if _sampler is not None and _sampler.is_alive():
+        return
+    _sample_stop = threading.Event()
+    _sampler = threading.Thread(target=_sample_loop, args=(_sample_stop,),
+                                name="manual-sampler", daemon=True)
+    _sampler.start()
+
+
+def _stop_manual_sampling() -> None:
+    """停止采样线程并清理活跃标记（进程退出路径）。"""
+    global _sampler
+    if _sample_stop is not None:
+        _sample_stop.set()
+    if _sampler is not None:
+        _sampler.join(timeout=2.0)
+        _sampler = None
+    try:
+        MANUAL_ACTIVE.unlink()
+    except BaseException:  # noqa: BLE001
+        pass
 
 
 @app.get("/api/info")
@@ -101,6 +213,8 @@ def jog(req: JogRequest):
     c = _require()
     if not (0 <= req.joint < DOF):
         return {"ok": False, "error_code": 7, "error_message": "joint out of range"}
+    # 手动示波器：第一次 jog 起激活采样线程，关节位置实时写入 live 流
+    _ensure_manual_sampling()
     step = req.step_deg if (req.step_deg and req.step_deg > 0) else JOG_STEP_DEG
     delta = [0.0] * DOF
     delta[req.joint] = step * (1 if req.direction >= 0 else -1)

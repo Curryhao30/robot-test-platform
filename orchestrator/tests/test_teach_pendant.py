@@ -152,3 +152,74 @@ def test_tp_robot_info_shown(tp):
     text = tp.inner_text("#robot-table")
     assert "maira_sim" in text and "7" in text, text
     capture.DETAILS["test_tp_robot_info_shown"] = "Robot 页显示型号/自由度/控制周期"
+
+
+# ---------------------------------------------------------------------------
+# 8. 手动示波器（P3）：jog 激活采样线程，关节位置按批写入 live 流（SSE 数据源）
+# ---------------------------------------------------------------------------
+def test_tp_jog_activates_manual_live_stream(tmp_path, monkeypatch):
+    """jog 后采样线程把关节位置写入 active.live.jsonl（manual-jog 段）+ 活跃标记。
+
+    不依赖真实 agent/浏览器：注入 FakeClient 与临时 REPORTS，只验证
+    "手动操作 → live 流段 + manual.live.active 标记"这条数据链路。
+    """
+    import json
+    import time
+
+    import teach_pendant.main as main
+
+    class _Joint:
+        def __init__(self, p):
+            self.position = p
+
+    class _State:
+        def __init__(self, pos):
+            self.joints = [_Joint(p) for p in pos]
+
+    class _Resp:
+        ok = True
+        error_code = 0
+        error_message = ""
+        motion_state = "DONE"
+
+    class _FakeClient:
+        def __init__(self):
+            self.pos = [0.0] * main.DOF
+
+        def get_state(self):
+            return _State(self.pos)
+
+        def stop(self):
+            return _Resp()
+
+        def move_relative(self, delta, **kw):
+            self.pos = [p + d for p, d in zip(self.pos, delta)]
+            return _Resp()
+
+    main.client = _FakeClient()
+    monkeypatch.setattr(main, "REPORTS", tmp_path)
+    monkeypatch.setattr(main, "LIVE_ACTIVE", tmp_path / "active.live.jsonl")
+    monkeypatch.setattr(main, "MANUAL_ACTIVE", tmp_path / "manual.live.active")
+    try:
+        r = main.jog(main.JogRequest(joint=0, direction=1))
+        assert r["ok"] is True
+
+        live = tmp_path / "active.live.jsonl"
+        deadline = time.time() + 5
+        lines = []
+        while time.time() < deadline:
+            if live.is_file():
+                lines = live.read_text(encoding="utf-8").splitlines()
+                if lines:
+                    break
+            time.sleep(0.1)
+        assert lines, "jog 后采样线程未写入 live 流"
+
+        seg = json.loads(lines[0])
+        assert seg["case"] == "manual-jog"
+        assert len(seg["q"][0]) == main.DOF       # 每个采样点含 7 轴关节位置
+        assert len(seg["t_ms"]) == len(seg["q"]) > 0
+        assert (tmp_path / "manual.live.active").is_file(), "缺少手动活跃标记"
+    finally:
+        main._stop_manual_sampling()
+        main.client = None
