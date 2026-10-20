@@ -18,6 +18,7 @@
     py -m teach_pendant.qt_panel --mock
     py -m teach_pendant.qt_panel --mock --fullscreen
     # "测试与曲线" 标签页：另起管理控制台（提供 /api/summary 等；只读查看无需 agent）
+    # 三个标签页：示教器（自绘 HMI）/ Web 示教器（内嵌 58081，含实时曲线）/ 测试与曲线（内嵌 58090 控制台）
     py -m uvicorn app.console:app --port 58090
     # 完整真实模式（agent + 示教器后端 + 控制台）可用 run_real_backend.py 一键拉起
     py teach_pendant/run_real_backend.py
@@ -207,7 +208,13 @@ class QTTeachPendant(QMainWindow, Ui_QtTeachPendant):
         self.tabWidget.setTabText(0, "示教器")
         self.tabWidget.setTabText(1, "测试与曲线")
 
-        # Tab2：内嵌控制台网页（用例清单 / 运行历史 / 缺陷视图 / 数据曲线），
+        # Tab2：内嵌 58081 Web 示教器（Jog 页下方含实时曲线卡片，同 SSE 数据源；
+        # 与浏览器端 100% 同构，Qt 侧零重写）。插入 index 1，原生 UI 之后。
+        self.tp_web = QWebEngineView()
+        self.tabWidget.insertTab(1, self.tp_web, "Web 示教器")
+        self.tp_web.setUrl(QUrl(url))
+
+        # Tab3：内嵌控制台网页（用例清单 / 运行历史 / 缺陷视图 / 数据曲线），
         # 复用 frontend/index.html，零重写；仅查看不需要 controller agent。
         self.web = QWebEngineView()
         _wl = QVBoxLayout(self.webHost)
