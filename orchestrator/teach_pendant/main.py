@@ -21,6 +21,7 @@ from typing import Optional
 
 import yaml
 from fastapi import FastAPI
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
@@ -34,6 +35,7 @@ MANUAL_ACTIVE = REPORTS / "manual.live.active"   # 手动活跃标记（控制�
 MANUAL_HZ = 50                # 采样频率（示波器观感，agent 1000Hz 控制周期内充足）
 MANUAL_BATCH_MS = 240         # 每批点数对应毫秒数 → 每行一段（SSE 增量推送粒度）
 MANUAL_MAX_BYTES = 4 * 1024 * 1024  # live 文件上限：超限清空轮转（防长挂爆盘）
+MANUAL_FRESH_SEC = 10.0       # 手动活跃新鲜度（与 console 一致：标记过期视为已停止）
 
 
 @asynccontextmanager
@@ -173,6 +175,59 @@ def _stop_manual_sampling() -> None:
         MANUAL_ACTIVE.unlink()
     except BaseException:  # noqa: BLE001
         pass
+
+
+def _manual_active() -> bool:
+    """手动监控是否活跃：采样线程 touch 标记文件，超过新鲜度阈值视为已停止。"""
+    try:
+        st = MANUAL_ACTIVE.stat()
+    except OSError:
+        return False
+    return (time.time() - st.st_mtime) < MANUAL_FRESH_SEC
+
+
+def _live_stream_gen(live: Path, is_active) -> str:
+    """SSE 生成器（与 console 同语义）：增量推送 live 文件新增行。
+
+    手动监控激活期间保持连接；标记过期且无新数据 → 断开。
+    """
+    pos = 0
+    idle = 0
+    while True:
+        if live.is_file():
+            try:
+                with live.open(encoding="utf-8") as f:
+                    f.seek(pos)
+                    new = f.read()
+                    pos = f.tell()
+            except OSError:
+                break
+            if new:
+                idle = 0
+                for line in new.splitlines():
+                    if line.strip():
+                        yield "data: " + line + "\n\n"
+                continue
+        idle += 1
+        if not is_active() and idle > 1:
+            break
+        time.sleep(0.4)
+
+
+@app.get("/api/live/active")
+def live_active():
+    """手动监控活跃状态（示教器前端 2s 心跳探测后连 SSE）。"""
+    return {"active": _manual_active()}
+
+
+@app.get("/api/live/stream")
+def live_stream():
+    """SSE 实时曲线（示教器页内嵌）：手动 jog / 运行中逐段推送关节位置。"""
+    return StreamingResponse(
+        _live_stream_gen(LIVE_ACTIVE, _manual_active),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 @app.get("/api/info")

@@ -52,9 +52,10 @@ def test_tp_layout_five_tabs(tp):
     assert tabs == ["Jog", "Program", "I/O", "Robot", "Alarm"], tabs
     # Jog 页 7 个轴控件 + 控制按钮齐全
     assert len(tp.query_selector_all("#axes .axis-row")) == 7
-    for sel in ["#servo-on", "#servo-off", "#stop", "#reset", "#coord-joint"]:
+    for sel in ["#servo-on", "#servo-off", "#stop", "#reset", "#coord-joint",
+                "#tp-live-svg", "#tp-live-note"]:
         assert tp.query_selector(sel), f"缺少 {sel}"
-    capture.DETAILS["test_tp_layout_five_tabs"] = "五块 tab 齐全；Jog 7 轴 + 控制按钮"
+    capture.DETAILS["test_tp_layout_five_tabs"] = "五块 tab 齐全；Jog 7 轴 + 控制按钮 + 实时曲线卡片"
 
 
 def test_tp_switch_tabs(tp):
@@ -223,3 +224,50 @@ def test_tp_jog_activates_manual_live_stream(tmp_path, monkeypatch):
     finally:
         main._stop_manual_sampling()
         main.client = None
+
+
+# ---------------------------------------------------------------------------
+# 9. 示教器页内嵌实时曲线：/api/live/active 心跳 + /api/live/stream SSE
+# ---------------------------------------------------------------------------
+def test_tp_live_active_endpoint(tmp_path, monkeypatch):
+    """/api/live/active：无标记 false；touch 后 true；标记过期后自动失效。"""
+    import os
+    import time
+
+    import teach_pendant.main as main
+    flag = tmp_path / "manual.live.active"
+    monkeypatch.setattr(main, "MANUAL_ACTIVE", flag)
+
+    assert main.live_active() == {"active": False}
+    flag.write_text("1", encoding="utf-8")
+    assert main.live_active() == {"active": True}
+    old = time.time() - 30
+    os.utime(flag, (old, old))
+    assert main.live_active() == {"active": False}
+
+
+def test_tp_live_stream_pushes_segments(tmp_path, monkeypatch):
+    """/api/live/stream：live 文件新增行逐段推送；标记过期后流收尾。"""
+    import json
+    import os
+    import time
+
+    import teach_pendant.main as main
+    live = tmp_path / "active.live.jsonl"
+    flag = tmp_path / "manual.live.active"
+    monkeypatch.setattr(main, "LIVE_ACTIVE", live)
+    monkeypatch.setattr(main, "MANUAL_ACTIVE", flag)
+    flag.write_text("1", encoding="utf-8")
+    with live.open("a", encoding="utf-8") as f:
+        f.write(json.dumps({"case": "manual-jog", "n": 2,
+                            "t_ms": [0.0, 20.0],
+                            "q": [[1.0, 2.0] for _ in range(7)]}) + "\n")
+
+    gen = main._live_stream_gen(live, main._manual_active)
+    ev = next(gen)
+    assert "manual-jog" in ev
+
+    old = time.time() - 30          # 手动监控停止（标记过期）→ 无新数据 → 收尾
+    os.utime(flag, (old, old))
+    with pytest.raises(StopIteration):
+        next(gen)

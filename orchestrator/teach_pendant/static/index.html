@@ -112,6 +112,11 @@
         </div>
       </div>
     </div>
+    <div class="card" style="margin-top:12px">
+      <h3>实时曲线（手动 jog / 运行中逐段推送 · SSE 示波器）</h3>
+      <div id="tp-live-svg"><div style="color:var(--dim);font-size:12px;padding:8px 0">等待数据…（jog 或运行测试后自动出现）</div></div>
+      <div id="tp-live-note" style="color:var(--dim);font-size:12px;margin-top:6px">未连接</div>
+    </div>
   </section>
   <!-- Program -->
   <section id="tab-program">
@@ -306,6 +311,70 @@ document.querySelectorAll(".run-prog").forEach((b) => {
 $("#speed").addEventListener("input", () => {
   $("#speed-label").textContent = $("#speed").value + "%";
 });
+
+// ---- 实时曲线（示教器页内嵌）：SSE 读 /api/live/stream，jog/运行中边动边画 ----
+const TP_COLORS = ["#38bdf8", "#f472b6", "#a78bfa", "#fbbf24", "#34d399", "#f87171", "#60a5fa"];
+let tpLive = null, tpX = [], tpQ = [], tpSegs = 0, tpTimer = null, tpRetry = 0;
+
+function tpEnsure() {
+  if (tpLive) return;
+  tpLive = new EventSource("/api/live/stream");
+  tpLive.onopen = function () { tpRetry = 0; $("#tp-live-note").textContent = "实时流已连接 · 已接收 " + tpSegs + " 段"; };
+  tpLive.onmessage = function (ev) {
+    let seg;
+    try { seg = JSON.parse(ev.data); } catch (e) { return; }
+    if (!seg || !seg.q || !seg.t_ms) return;
+    const dof = seg.q.length;
+    while (tpQ.length < dof) tpQ.push([]);
+    const base = tpX.length ? tpX[tpX.length - 1] : 0;
+    for (let i = 0; i < seg.t_ms.length; i++) {
+      tpX.push(base + seg.t_ms[i]);
+      for (let a = 0; a < dof; a++) tpQ[a].push(seg.q[i][a]);
+    }
+    tpSegs++;
+    $("#tp-live-note").textContent = "运行中 · 已接收 " + tpSegs + " 段 · " + tpX.length + " 点 · 最近: " + (seg.case || "-");
+    if (!tpTimer) tpTimer = setTimeout(tpDraw, 200);   // 重绘防抖
+  };
+  tpLive.onerror = function () {
+    if (tpLive && tpLive.readyState === EventSource.CLOSED) tpLive = null;  // 心跳探测到活跃后重连
+  };
+}
+
+function tpDraw() {
+  tpTimer = null;
+  const box = $("#tp-live-svg");
+  if (!box || !tpX.length) return;
+  const W = 720, H = 170, padL = 40, padR = 10, padT = 12, padB = 20;
+  let lo = Infinity, hi = -Infinity;
+  tpQ.forEach((a) => a.forEach((v) => { if (v < lo) lo = v; if (v > hi) hi = v; }));
+  if (!isFinite(lo) || !isFinite(hi) || lo === hi) { lo = -1; hi = 1; }
+  const stride = tpX.length > 1500 ? Math.ceil(tpX.length / 1500) : 1;   // 抽稀
+  const idx = [];
+  for (let i = 0; i < tpX.length; i += stride) idx.push(i);
+  if (idx[idx.length - 1] !== tpX.length - 1) idx.push(tpX.length - 1);
+  const n = Math.max(idx.length - 1, 1);
+  const x = (i) => padL + (i / n) * (W - padL - padR);
+  const y = (v) => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
+  let h = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block">';
+  for (let g = 0; g <= 4; g++) {
+    const vy = lo + (hi - lo) * g / 4;
+    h += '<line x1="' + padL + '" y1="' + y(vy) + '" x2="' + (W - padR) + '" y2="' + y(vy) + '" stroke="#39424d" stroke-width="1"/>';
+    h += '<text x="' + (padL - 5) + '" y="' + (y(vy) + 3) + '" text-anchor="end" font-size="9" fill="#8b96a1">' + vy.toFixed(Math.abs(vy) < 100 ? 1 : 0) + '</text>';
+  }
+  tpQ.forEach((a, ai) => {
+    const pts = [];
+    for (let j = 0; j < idx.length; j++) pts.push(x(j).toFixed(1) + "," + y(a[idx[j]]).toFixed(1));
+    h += '<polyline points="' + pts.join(" ") + '" fill="none" stroke="' + TP_COLORS[ai] + '" stroke-width="1.5"/>';
+  });
+  for (let j = 0; j < Math.min(tpQ.length, 7); j++) h += '<text x="' + (padL + 5 + j * 22) + '" y="' + (padT - 2) + '" font-size="9" fill="' + TP_COLORS[j] + '">J' + (j + 1) + '</text>';
+  h += '<text x="' + (W / 2) + '" y="' + (H - 4) + '" text-anchor="middle" font-size="9" fill="#8b96a1">运行累计 t / ms</text>';
+  box.innerHTML = h;
+}
+
+function tpCheck() {
+  fetch("/api/live/active").then((r) => r.json()).then((d) => { if (d.active) tpEnsure(); }).catch(() => {});
+}
+setInterval(tpCheck, 2000);
 
 (async function init() {
   buildAxes();
