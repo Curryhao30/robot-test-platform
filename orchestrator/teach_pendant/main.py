@@ -36,6 +36,7 @@ MANUAL_HZ = 50                # 采样频率（示波器观感，agent 1000Hz �
 MANUAL_BATCH_MS = 240         # 每批点数对应毫秒数 → 每行一段（SSE 增量推送粒度）
 MANUAL_MAX_BYTES = 4 * 1024 * 1024  # live 文件上限：超限清空轮转（防长挂爆盘）
 MANUAL_FRESH_SEC = 10.0       # 手动活跃新鲜度（与 console 一致：标记过期视为已停止）
+MANUAL_IDLE_SEC = 8.0         # 空闲自动停止：连续 N 秒无 jog 操作则停止采样（页面定格，不再无限增长）
 
 
 @asynccontextmanager
@@ -59,9 +60,10 @@ app = FastAPI(title="Virtual Teach Pendant API", lifespan=lifespan)
 client: ControllerClient | None = None
 profile: dict = {}
 
-# 手动采样线程状态（第一次 jog 激活，进程存活期间常驻）
+# 手动采样线程状态（第一次 jog 激活；无操作 MANUAL_IDLE_SEC 秒后自动停止）
 _sampler: threading.Thread | None = None
 _sample_stop: threading.Event | None = None
+_last_jog_ts: float = 0.0      # 最近一次 jog 操作时刻（采样线程据此判定空闲）
 
 JOG_STEP_DEG = 5.0
 DOF = 7
@@ -129,12 +131,27 @@ def _write_manual_segment(buf: list[tuple[float, list[float]]], t0: float) -> No
         pass
 
 
+def _clear_manual_active() -> None:
+    """清除手动活跃标记（线程空闲退出 / 进程退出时调用）。"""
+    try:
+        MANUAL_ACTIVE.unlink()
+    except BaseException:  # noqa: BLE001
+        pass
+
+
 def _sample_loop(stop: threading.Event) -> None:
-    """50Hz 读控制器关节位置，每 MANUAL_BATCH_MS 攒一批写一段 live 流。"""
+    """50Hz 读控制器关节位置，每 MANUAL_BATCH_MS 攒一批写一段 live 流。
+
+    空闲自动停止：连续 MANUAL_IDLE_SEC 秒没有 jog 操作，线程退出并清除活跃
+    标记 → SSE 收尾 → 前端页面定格（不操作时画面静止，不再无限增长）。
+    """
     period = 1.0 / MANUAL_HZ
     buf: list[tuple[float, list[float]]] = []
     t0 = time.time()
     while not stop.is_set():
+        if time.time() - _last_jog_ts > MANUAL_IDLE_SEC:
+            _clear_manual_active()
+            break
         _touch_manual()
         try:
             st = _require().get_state()
@@ -171,10 +188,7 @@ def _stop_manual_sampling() -> None:
     if _sampler is not None:
         _sampler.join(timeout=2.0)
         _sampler = None
-    try:
-        MANUAL_ACTIVE.unlink()
-    except BaseException:  # noqa: BLE001
-        pass
+    _clear_manual_active()
 
 
 def _manual_active() -> bool:
@@ -268,6 +282,8 @@ def jog(req: JogRequest):
     c = _require()
     if not (0 <= req.joint < DOF):
         return {"ok": False, "error_code": 7, "error_message": "joint out of range"}
+    global _last_jog_ts
+    _last_jog_ts = time.time()   # 空闲判定：jog 操作刷新最后活动时刻
     # 手动示波器：第一次 jog 起激活采样线程，关节位置实时写入 live 流
     _ensure_manual_sampling()
     step = req.step_deg if (req.step_deg and req.step_deg > 0) else JOG_STEP_DEG

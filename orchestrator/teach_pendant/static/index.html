@@ -337,7 +337,12 @@ function tpEnsure() {
     if (!tpTimer) tpTimer = setTimeout(tpDraw, 200);   // 重绘防抖
   };
   tpLive.onerror = function () {
-    if (tpLive && tpLive.readyState === EventSource.CLOSED) tpLive = null;  // 心跳探测到活跃后重连
+    if (tpLive && tpLive.readyState === EventSource.CLOSED) {
+      tpLive = null;
+      // 空闲自动停止：8 秒无 jog 操作采样线程退出、SSE 收尾 → 页面定格。
+      // 再次 jog 时心跳探测到活跃会自动重连续画。
+      $("#tp-live-note").textContent = "已停止 · 共接收 " + tpSegs + " 段（再次 jog 自动续画）";
+    }
   };
 }
 

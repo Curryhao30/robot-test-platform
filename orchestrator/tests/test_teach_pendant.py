@@ -271,3 +271,47 @@ def test_tp_live_stream_pushes_segments(tmp_path, monkeypatch):
     os.utime(flag, (old, old))
     with pytest.raises(StopIteration):
         next(gen)
+
+
+# ---------------------------------------------------------------------------
+# 10. 空闲自动停止：连续 MANUAL_IDLE_SEC 秒无 jog → 采样线程退出 + 清活跃标记
+#     （解决"不操作时 note/点数无限增长导致窗口持续跳变"）
+# ---------------------------------------------------------------------------
+def test_tp_sampler_idle_auto_stop(tmp_path, monkeypatch):
+    """模拟刚 jog 过（_last_jog_ts=now），随后不再操作 → 线程因空闲退出、标记清除。"""
+    import time
+
+    import teach_pendant.main as main
+
+    class _Joint:
+        def __init__(self, p):
+            self.position = p
+
+    class _State:
+        def __init__(self, pos):
+            self.joints = [_Joint(p) for p in pos]
+
+    class _FakeClient:
+        def get_state(self):
+            return _State([0.0] * main.DOF)
+
+    main.client = _FakeClient()
+    monkeypatch.setattr(main, "REPORTS", tmp_path)
+    monkeypatch.setattr(main, "LIVE_ACTIVE", tmp_path / "active.live.jsonl")
+    monkeypatch.setattr(main, "MANUAL_ACTIVE", tmp_path / "manual.live.active")
+    monkeypatch.setattr(main, "MANUAL_IDLE_SEC", 0.3)      # 加速：0.3s 无操作即停
+    monkeypatch.setattr(main, "_last_jog_ts", time.time())  # 模拟刚 jog 过
+    try:
+        main._ensure_manual_sampling()
+        assert main._sampler is not None and main._sampler.is_alive(), "采样线程未启动"
+
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            if main._sampler is None or not main._sampler.is_alive():
+                break
+            time.sleep(0.1)
+        assert main._sampler is None or not main._sampler.is_alive(), "空闲后采样线程未退出"
+        assert not (tmp_path / "manual.live.active").is_file(), "空闲退出后活跃标记应被清除"
+    finally:
+        main._stop_manual_sampling()
+        main.client = None
