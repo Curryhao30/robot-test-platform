@@ -132,6 +132,17 @@
   var liveQ = [];           // 7 轴关节角（逐段 append）
   var liveSegs = 0;
   var liveRetry = 0;        // 流未就绪时的重连计数
+  var liveDrawTimer = null; // 重绘防抖：存量段涌入时合并为 200ms 一次，避免逐段全量重绘卡顿
+  function scheduleLiveDraw() {
+    if (liveDrawTimer) return;
+    liveDrawTimer = setTimeout(function () {
+      liveDrawTimer = null;
+      try { drawLive(); } catch (e) {
+        var box = document.querySelector('.liveSvg');
+        if (box) box.innerHTML = '<div class="empty">曲线渲染失败：' + esc(e.message || e) + '</div>';
+      }
+    }, 200);
+  }
 
   function toast(msg) {
     var t = $('toast');
@@ -146,6 +157,7 @@
     // 新一轮运行：断开旧流并清空累计数据，避免与上一轮曲线混在一起
     if (liveES) { liveES.close(); liveES = null; }
     if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (liveDrawTimer) { clearTimeout(liveDrawTimer); liveDrawTimer = null; }
     liveX = []; liveQ = []; liveSegs = 0; liveRetry = 0;
     var box = document.querySelector('.liveSvg');
     if (box) box.innerHTML = '<div class="empty">等待轨迹数据…</div>';
@@ -169,9 +181,7 @@
       }
       liveSegs++;
       $('liveNote').textContent = '运行中 · 已接收 ' + liveSegs + ' 段 · ' + liveX.length + ' 采样点 · 最近: ' + (seg.case || '-');
-      try { drawLive(); } catch (e) {
-        document.querySelector('.liveSvg').innerHTML = '<div class="empty">曲线渲染失败：' + esc(e.message || e) + '</div>';
-      }
+      scheduleLiveDraw();
     };
     es.onerror = function () {
       if (es.readyState === EventSource.CLOSED) {
