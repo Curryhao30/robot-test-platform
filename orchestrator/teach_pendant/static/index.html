@@ -333,6 +333,7 @@ function tpEnsure() {
     }
     tpSegs++;
     $("#tp-live-note").textContent = "运行中 · 已接收 " + tpSegs + " 段 · " + tpX.length + " 点 · 最近: " + (seg.case || "-");
+    if (!tpChart) tpInitChart();
     if (!tpTimer) tpTimer = setTimeout(tpDraw, 200);   // 重绘防抖
   };
   tpLive.onerror = function () {
@@ -340,10 +341,28 @@ function tpEnsure() {
   };
 }
 
+// 曲线增量绘制：SVG 只创建一次，之后仅更新 7 条 polyline 的 points。
+// 相比每次 innerHTML 全量重建，QtWebEngine（桌面面板内嵌）下避免高频重绘闪烁。
+let tpChart = null, tpLo = Infinity, tpHi = -Infinity;
+
+function tpInitChart() {
+  const box = $("#tp-live-svg");
+  if (!box) return;
+  const W = 720, H = 170, padL = 40, padT = 12;
+  let h = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block">' +
+          '<g id="tp-grid"></g><g id="tp-pts">';
+  for (let a = 0; a < 7; a++) h += '<polyline id="tp-poly-' + a + '" fill="none" stroke="' + TP_COLORS[a] + '" stroke-width="1.5"/>';
+  h += '</g>';
+  for (let j = 0; j < 7; j++) h += '<text x="' + (padL + 5 + j * 22) + '" y="' + (padT - 2) + '" font-size="9" fill="' + TP_COLORS[j] + '">J' + (j + 1) + '</text>';
+  h += '<text x="' + (W / 2) + '" y="' + (H - 4) + '" text-anchor="middle" font-size="9" fill="#8b96a1">运行累计 t / ms</text>';
+  h += '</svg>';
+  box.innerHTML = h;
+  tpChart = box.querySelector("svg");
+}
+
 function tpDraw() {
   tpTimer = null;
-  const box = $("#tp-live-svg");
-  if (!box || !tpX.length) return;
+  if (!tpChart || !tpX.length) return;
   const W = 720, H = 170, padL = 40, padR = 10, padT = 12, padB = 20;
   let lo = Infinity, hi = -Infinity;
   tpQ.forEach((a) => a.forEach((v) => { if (v < lo) lo = v; if (v > hi) hi = v; }));
@@ -355,20 +374,28 @@ function tpDraw() {
   const n = Math.max(idx.length - 1, 1);
   const x = (i) => padL + (i / n) * (W - padL - padR);
   const y = (v) => padT + (1 - (v - lo) / (hi - lo)) * (H - padT - padB);
-  let h = '<svg viewBox="0 0 ' + W + ' ' + H + '" style="width:100%;height:auto;display:block">';
-  for (let g = 0; g <= 4; g++) {
-    const vy = lo + (hi - lo) * g / 4;
-    h += '<line x1="' + padL + '" y1="' + y(vy) + '" x2="' + (W - padR) + '" y2="' + y(vy) + '" stroke="#39424d" stroke-width="1"/>';
-    h += '<text x="' + (padL - 5) + '" y="' + (y(vy) + 3) + '" text-anchor="end" font-size="9" fill="#8b96a1">' + vy.toFixed(Math.abs(vy) < 100 ? 1 : 0) + '</text>';
+  // 网格/刻度：量程变化 >0.5° 才重建，避免每段都动
+  if (tpLo === Infinity || Math.abs(lo - tpLo) > 0.5 || Math.abs(hi - tpHi) > 0.5) {
+    let g = "";
+    for (let k = 0; k <= 4; k++) {
+      const vy = lo + (hi - lo) * k / 4;
+      g += '<line x1="' + padL + '" y1="' + y(vy) + '" x2="' + (W - padR) + '" y2="' + y(vy) + '" stroke="#39424d" stroke-width="1"/>' +
+           '<text x="' + (padL - 5) + '" y="' + (y(vy) + 3) + '" text-anchor="end" font-size="9" fill="#8b96a1">' + vy.toFixed(Math.abs(vy) < 100 ? 1 : 0) + '</text>';
+    }
+    const grid = tpChart.querySelector("#tp-grid");
+    if (grid) grid.innerHTML = g;
+    tpLo = lo; tpHi = hi;
   }
+  // 只更新折线 points（DOM 结构稳定，QtWebEngine 轻量重绘）
   tpQ.forEach((a, ai) => {
-    const pts = [];
-    for (let j = 0; j < idx.length; j++) pts.push(x(j).toFixed(1) + "," + y(a[idx[j]]).toFixed(1));
-    h += '<polyline points="' + pts.join(" ") + '" fill="none" stroke="' + TP_COLORS[ai] + '" stroke-width="1.5"/>';
+    const poly = tpChart.querySelector("#tp-poly-" + ai);
+    if (!poly) return;
+    let pts = "";
+    for (let j = 0; j < idx.length; j++) {
+      pts += (j ? " " : "") + x(j).toFixed(1) + "," + y(a[idx[j]]).toFixed(1);
+    }
+    poly.setAttribute("points", pts);
   });
-  for (let j = 0; j < Math.min(tpQ.length, 7); j++) h += '<text x="' + (padL + 5 + j * 22) + '" y="' + (padT - 2) + '" font-size="9" fill="' + TP_COLORS[j] + '">J' + (j + 1) + '</text>';
-  h += '<text x="' + (W / 2) + '" y="' + (H - 4) + '" text-anchor="middle" font-size="9" fill="#8b96a1">运行累计 t / ms</text>';
-  box.innerHTML = h;
 }
 
 function tpCheck() {
