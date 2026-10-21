@@ -64,7 +64,8 @@ from PyQt5.QtCore import QSettings, Qt, QTimer, QUrl
 from PyQt5.QtGui import QFont, QGuiApplication, QKeySequence
 from PyQt5.QtNetwork import QNetworkAccessManager, QNetworkRequest
 from PyQt5.QtWebEngineWidgets import QWebEngineView
-from PyQt5.QtWidgets import QApplication, QMainWindow, QShortcut, QVBoxLayout
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QShortcut,
+                             QVBoxLayout, QSizePolicy)
 
 try:
     from teach_pendant.ui_qt_panel import Ui_QtTeachPendant
@@ -210,13 +211,17 @@ class QTTeachPendant(QMainWindow, Ui_QtTeachPendant):
 
         # Tab2：内嵌 58081 Web 示教器（Jog 页下方含实时曲线卡片，同 SSE 数据源；
         # 与浏览器端 100% 同构，Qt 侧零重写）。插入 index 1，原生 UI 之后。
+        # sizePolicy=Ignored：忽略页面 contentsSize，始终填满页签区域，
+        # 避免 QWebEngineView 随页面内容尺寸变化带动窗口 resize 抖动。
         self.tp_web = QWebEngineView()
+        self.tp_web.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         self.tabWidget.insertTab(1, self.tp_web, "Web 示教器")
         self.tp_web.setUrl(QUrl(url))
 
         # Tab3：内嵌控制台网页（用例清单 / 运行历史 / 缺陷视图 / 数据曲线），
         # 复用 frontend/index.html，零重写；仅查看不需要 controller agent。
         self.web = QWebEngineView()
+        self.web.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Ignored)
         _wl = QVBoxLayout(self.webHost)
         _wl.setContentsMargins(0, 0, 0, 0)
         _wl.addWidget(self.web)

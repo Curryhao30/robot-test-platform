@@ -24,7 +24,8 @@
                padding: 6px 18px; cursor: pointer; font-size: 13px; }
   nav button.active { color: var(--text); border-bottom-color: var(--bg);
                       background: #2a3139; }
-  main { flex: 1; overflow: auto; padding: 14px 16px; }
+  main { flex: 1; overflow: auto; padding: 14px 16px;
+         scrollbar-gutter: stable; }   /* 预留滚动条空间：出现/消失不再引起视口宽度震荡 */
   section { display: none; }
   section.active { display: block; }
   .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
